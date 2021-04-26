@@ -1,18 +1,28 @@
-import { Crossword, Variable } from './cross.mjs';
-import { not, createUserActivationAction, createUserActionEnd, mapCellInVariable } from './helper.mjs';
-import { Action } from './action.mjs';
-import { createKeys, extractKeyEvent, toggleKeyPressClass } from './keyboard.mjs';
+import { Crossword, Variable } from './cross.js';
+import { not, createUserActivationAction, createUserActionEnd, mapCellInVariable } from './helper.js';
+import { Action } from './action.js';
+import { createKeys, extractKeyEvent, toggleKeyPressClass } from './keyboard.js';
 
-export function init(shadowRoot, crosswordDimentions) {
+export function init(shadowRoot, crosswordDimentions, crossword, gridFile, constraints) {
 
     // const crosswordDimentions = [15, 15];
 
     const rootUrl = 'http://localhost:3000/'; // @TODO change to CDN?
-    const gridFiles = ['api/grids/7', 'api/words/',].map((req) => `${rootUrl}${req}`);
-    const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
+
+    const gridFiles = gridFile ? [`api/grids/${gridFile}`] : ['api/grids/empty'];
+
+    // if we haven't already fetched the words
+    if(!crossword) {
+      gridFiles.push('api/words');
+    }
+
+    const fetchFiles = gridFiles.map((req) => `${rootUrl}${req}`);
+    // const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
+    
     // @TODO how dow we choose size?
-    const cellSize = 33;
     const gridSpan = 495;
+    const cellSize = gridSpan / crosswordDimentions[0];
+
     const padding = 3;
     const letterFontSize = 22;
     const indexSize = 11;
@@ -44,24 +54,40 @@ export function init(shadowRoot, crosswordDimentions) {
     }
 
     //@TODO we don't need the vocab file for displaying a generated crossword
-    Promise.all(gridFiles.map(file => fetch(file)))
-        .then(responses => Promise.all(responses.map(response => response.json())))
+    let promise;
+    if(!crossword && !constraints) { // fetch both words and grid (either given grid or empty)
+        promise = Promise.all(fetchFiles.map(file => fetch(file)))
+        .then(responses => Promise.all(responses.map(response => response.json())));
+    } else if (!crossword && constraints) { // fetch only the words
+        promise = fetch(fetchFiles[1])
+        .then(response => response.json())
+        .then((words) => [{constraints}, words]);
+    } else if (!constraints) { // we have the words, fetch the grid (either given or empty)
+        promise = fetch(fetchFiles[0])
+        .then(response => response.json())
+        .then((structure) => [structure, crossword.words]);
+    } else {
+        promise = Promise([{constraints}, crossword.words]);
+    }
+
+    return promise
         .then(([structure, words]) => new Crossword(structure, words, ...crosswordDimentions))
         .then((crossword) => makeCells(crossword))
         .then((crossword) => makeGrid(crossword))
         .then((crossword) => addActions(crossword))
-        .then((actionInstance) => displayKeyboard(actionInstance))
+        // .then((actionInstance) => displayKeyboard(actionInstance))
         .catch((err) => {
             console.log(err); // @ TODO handle the error
         })
         .then((actionInstance) =>
-            Promise.all(solutionFiles.map(file => fetch(file)))
-                // create clusure for actionInstance
-                .then(responses => Promise.all(responses.map(response => response.json())))
-                .then(data => getClues(data))
-                .then(clues => displayClues(clues, actionInstance))
-                .then((actionInstance) => initializeView(actionInstance))
-        )
+        //     Promise.all(solutionFiles.map(file => fetch(file)))
+        //         // create clusure for actionInstance
+        //         .then(responses => Promise.all(responses.map(response => response.json())))
+        //         .then(data => getClues(data))
+        //         .then(clues => displayClues(clues, actionInstance))
+        //         .then((actionInstance) => initializeView(actionInstance))
+            initializeView(actionInstance)
+         )
         .catch((err) => {
             console.log(err);
         });
@@ -120,6 +146,10 @@ export function init(shadowRoot, crosswordDimentions) {
         rowGroup.setAttributeNS(null, 'data-group', 'cells');
         rowGroup.setAttributeNS(null, 'role', 'rowgroup');
         //console.log(variables);
+
+        // if we have set constraints = false values for a cell !!!
+        
+        
         for (let i = 0; i < crossword.height; i++) {
 
             const row = crossword.structure[i];
@@ -161,43 +191,61 @@ export function init(shadowRoot, crosswordDimentions) {
                 // set up a map from Id to variables
                 cellIdToVariableDict[`cell-id-${i * crossword.width + j}`] = {};
 
-                if (!row[j]) {
-                    rectWidth = cellSize, rectHeight = rectWidth;
-                    cell.setAttributeNS(null, 'x', (j * cellSize) + padding);
-                    cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
-                    cell.setAttributeNS(null, 'fill', '#333');
-                    cell.classList.add('black');
-                } else {
-                    // get ALL the words in ALL the directions to which this cell belongs
-                    variables.forEach((v) => {
-                        const cellIndex = v.cells.findIndex(cell => Variable.isSameCell(cell, [i, j]));
-                        if (cellIndex > -1) {
-                            // set the data-variable attribute for each direction that the cell exists in a word
-                            cell.setAttributeNS(null, `data-variable-${v.direction}`, `${v.i}-${v.j}`);
-                            // complete the celId map
-                            cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][v.direction] =
-                                { 'variable': v, 'cellNumber': cellIndex, 'letter': null, 'isStartOfWord': cellIndex == 0 };
-                            return true;
-                        }
-                        return false;
-                    });
+                // if we have set constraints
+                if (crossword.structure.filter( (row) => row.find((c) => !c) ).length) {
 
+                    if (!row[j]) {
+                        rectWidth = cellSize, rectHeight = rectWidth;
+                        cell.setAttributeNS(null, 'x', (j * cellSize) + padding);
+                        cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
+                        cell.setAttributeNS(null, 'fill', '#333');
+                        cell.classList.add('black');
+                    } else {
+                        // get ALL the words in ALL the directions to which this cell belongs
+                        variables.forEach((v) => {
+                            const cellIndex = v.cells.findIndex(cell => Variable.isSameCell(cell, [i, j]));
+                            if (cellIndex > -1) {
+                                // set the data-variable attribute for each direction that the cell exists in a word
+                                cell.setAttributeNS(null, `data-variable-${v.direction}`, `${v.i}-${v.j}`);
+                                // complete the celId map
+                                cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][v.direction] =
+                                    { 'variable': v, 'cellNumber': cellIndex, 'letter': null, 'isStartOfWord': cellIndex == 0 };
+                                return true;
+                            }
+                            return false;
+                        });
+
+                        rectWidth = cellSize, rectHeight = rectWidth; // account for stroke width of the grid
+                        cell.setAttributeNS(null, 'x', (j * cellSize) + padding); // account for stroke width of the grid
+                        cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
+                        cell.setAttributeNS(null, 'fill', '#fff'); // should be transparent? => fill = none
+
+                        //@TODO: precalculate this??? ([direction[counter]: ])
+                        
+                        const startOfWordVariable = variables.find(v => v.i == i && v.j == j);
+                        if (startOfWordVariable) {
+                            wordIndex.textContent = counter;
+                            startOfWordCells.push({ cell, startOfWordVariable });
+                            counter++;
+                        }
+
+                    }
+                } else {
+                    cell.setAttributeNS(null, `data-variable-${Variable.ACROSS}`, `${i}-${j}`);
+                    cell.setAttributeNS(null, `data-variable-${Variable.DOWN}`, `${i}-${j}`);
+                    // complete the celId map
+                    cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][Variable.ACROSS] =
+                        { 'variable': new Variable(i,j,Variable.ACROSS, 1), 'cellNumber': 0, 'letter': null, 'isStartOfWord': 0 };
+                    cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][Variable.DOWN] =
+                    { 'variable': new Variable(i,j,Variable.DOWN, 1), 'cellNumber': 0, 'letter': null, 'isStartOfWord': 0 };
                     rectWidth = cellSize, rectHeight = rectWidth; // account for stroke width of the grid
                     cell.setAttributeNS(null, 'x', (j * cellSize) + padding); // account for stroke width of the grid
                     cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
                     cell.setAttributeNS(null, 'fill', '#fff'); // should be transparent? => fill = none
-
-                    //@TODO: precalculate this??? ([direction[counter]: ])
-                    const startOfWordVariable = variables.find(v => v.i == i && v.j == j);
-                    if (startOfWordVariable) {
-                        wordIndex.textContent = counter;
-                        startOfWordCells.push({ cell, startOfWordVariable });
-                        counter++;
-                    }
-
                 }
-                cell.setAttributeNS(null, 'width', rectWidth);
-                cell.setAttributeNS(null, 'height', rectHeight);
+
+                cell.setAttributeNS(null, 'width', cellSize);
+                cell.setAttributeNS(null, 'height', cellSize);
                 cell.setAttributeNS(null, 'stroke-width', 0);
 
                 // ARIA LABELS
@@ -211,21 +259,21 @@ export function init(shadowRoot, crosswordDimentions) {
                 rowGroup.appendChild(cellGroup);
             }
         }
+    
+
         svg.appendChild(rowGroup);
         return crossword;
     }
 
     function addActions(crossword) {
-        const direction = startOfWordCells[0].startOfWordVariable.direction;
+        const direction = startOfWordCells.length ? startOfWordCells[0].startOfWordVariable.direction : Variable.ACROSS;
         const action = new Action(crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot);
         const activate = action.activate.bind(action);
         const keydown = action.keydown.bind(action);
         const touchAction = action.touchAction.bind(action, board);
         const reset = action.reset.bind(action, board);
 
-
         const cell = shadowRoot.querySelector('#cell-id-0');
-        action.cellSpace = cell.getBoundingClientRect();
 
         // ACTIVATE CELL EVENT
         if (window.PointerEvent) {
@@ -518,9 +566,10 @@ export function init(shadowRoot, crosswordDimentions) {
     function initializeView(actionInstance) {
         // set initial active cell
         if (!actionInstance.selected) {
-            const [firstWord] = startOfWordCells;
+            const firstWord = startOfWordCells.length ? startOfWordCells[0] : {cell: shadowRoot.querySelector('#cell-id-0')};
             firstWord.cell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true }));
         }
+        return actionInstance;
     }
 
 }
