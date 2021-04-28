@@ -3,7 +3,7 @@ import { not, createUserActivationAction, createUserActionEnd, mapCellInVariable
 import { Action } from './action.js';
 import { createKeys, extractKeyEvent, toggleKeyPressClass } from './keyboard.js';
 
-export function init(shadowRoot, crosswordDimentions, crossword, gridFile, constraints) {
+export function init(shadowRoot, crosswordDimentions, crossword, gridFile=7, constraints, solution, clues) {
 
     // const crosswordDimentions = [15, 15];
 
@@ -59,6 +59,8 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
     const board = shadowRoot.querySelector('.board');
 
     const dependencies = {listeners: []} // {target: fn}
+
+    
    
     //@TODO we don't need the vocab file for displaying a generated crossword
     let promise;
@@ -72,26 +74,21 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
 
     } else if (!crossword && constraints) { 
         // we have the constraints
-        // fetch only the words
-        constraints = Array.from(createSymmetricConstraints([...constraints], ...crosswordDimentions));
+        constraints = manageConstraints([...constraints]); 
+        // fetch only the words       
         promise = fetch(fetchFiles[1], reqHeaders[1])
         .then(response => response.json())
         .then((words) => [{constraints}, words]);
+
     } else if (!constraints) { // we have the words, fetch the grid (either given or empty)
         promise = fetch(fetchFiles[0], reqHeaders[0])
         .then(response => response.json())
         .then((structure) => [structure, {vocab:crossword.words}]);
+
         // @TODO we must store the id of the grid if we created one - DON'T CREATE ONE UNITL WE SAVE !!!!
 
     } else { // we have the constraints and the crossword => resolve promise
-        console.log('remove', constraints,crossword.constraints);
-        if(constraints.length >= crossword.constraints.length) {
-            // we have added constraints => we need tocreate symmetry
-            constraints = Array.from(createSymmetricConstraints([...constraints], ...crosswordDimentions));
-        } else {
-            // we have removed constraints => must also remove the symmetrical
-            constraints = Array.from(removeSymmetricConstraints([...constraints], ...crosswordDimentions))
-        }
+        constraints = manageConstraints([...constraints]);
         promise = Promise.resolve([{constraints}, {vocab:crossword.words}]);
     }
 
@@ -107,16 +104,33 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
         // .then((actionInstance) =>
         //     Promise.all(solutionFiles.map(file => fetch(file, { method: 'GET', ...headers})))
         //         // // // create clusure for actionInstance
-        //         // // .then(responses => Promise.all(responses.map(response => response.json())))
-        //         // // .then(data => getClues(data))
-        //         // // .then(clues => displayClues(clues, actionInstance))
+        //         // .then(responses => Promise.all(responses.map(response => response.json())))
+        //         // .then(data => getClues(data))
+        //         // .then(clues => displayClues(clues, actionInstance))
         //         // .then((actionInstance) => initializeView(actionInstance))
+        //         // .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
         //  )
-        .then((actionInstance) => initializeView(actionInstance))
-        .then((actionInstance) => ({dependencies, actionInstance}))
+        .then((actionInstance) => 
+            Promise.resolve(getClues([{solution}, {clues}]))
+                        .then((clues)=> displayClues(clues, actionInstance))
+                        .then((actionInstance) => initializeView(actionInstance))
+                        .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
+        )
         .catch((err) => {
             console.log(err);
         });
+
+
+    function manageConstraints(constraints) {
+        if(constraints.length >= crossword.constraints.length) {
+            // we have added constraints => we need tocreate symmetry
+            constraints = Array.from(createSymmetricConstraints([...constraints], ...crosswordDimentions));
+        } else {
+            // we have removed constraints => must also remove the symmetrical
+            constraints = Array.from(removeSymmetricConstraints([...constraints], ...crosswordDimentions))
+        }
+        return constraints;
+    }
 
     // REF: https://www.motiontricks.com/creating-dynamic-svg-elements-with-javascript/
     function makeGrid(crossword) {
@@ -323,117 +337,107 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
         // return the action instance 
         return action;
     }
-
  
 
-    // @TODO Move to generation files!!!!!!!!!!!!!! 
     function getClues([{ solution }, { clues }]) {
-        //console.log(solution, clues)
+        // console.log(solution, clues)
         const allClues = { 'across': {}, 'down': {} };
-        for (let keyVariable in solution) {
+        for (let [keyVariable, value]  of solution) {
             // convert to javascript class from json string
-            const classFunction = new Function(`Variable = ${Variable}; return new ${keyVariable}; `)
-            const variable = classFunction();
-            const clue = solution[keyVariable];
+            // const classFunction = new Function(`Variable = ${Variable}; return new ${keyVariable}; `)
+            // const variable = classFunction();
+            const clue = value; // solution.get(keyVariable);
             const wordIndex = startOfWordCells.findIndex(({ startOfWordVariable }) =>
-                startOfWordVariable.i == variable.i && startOfWordVariable.j == variable.j)
-            allClues[variable.direction][wordIndex + 1] = { [clue]: clues[clue] };
+                startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j)
+            allClues[keyVariable.direction][wordIndex + 1] = { [clue]: clues[clue] }; //@TODO this is problematic if we have 2 times the same word
         };
         return allClues;
     }
 
-    // function displayClues(clues, actionInstance) {
-    //     console.log(clues)
-    //     if (!useTouch) {
-    //         displayDesktopClues(clues, actionInstance);
-    //     } else {
-    //         displayTouchClues(clues, actionInstance);
-    //     }
+    function displayClues(clues, actionInstance) {
+        displayDesktopClues(clues, actionInstance);
+        return actionInstance;
+    }
 
-    //     return actionInstance;
-    // }
+    function createCluesList(clues, direction) {
+        const ol = document.createElement('ol');
+        ol.setAttribute('data-dir', direction);
 
-    // function createCluesList(clues, direction) {
-    //     const ol = document.createElement('ol');
-    //     ol.setAttribute('data-dir', direction);
+        for (let clueNumber in clues[direction]) {
 
-    //     for (let clueNumber in clues[direction]) {
+            const li = document.createElement('li');
+            li.setAttribute('data-li-clue-index', `${clueNumber}`);
+            const numberCell = document.createElement('span');
+            let numberText
+            if (useTouch) {
+                numberText = document.createTextNode(`${clueNumber}${direction[0]}`);
+            } else {
+                numberText = document.createTextNode(`${clueNumber}`);
+            }
+            numberCell.appendChild(numberText);
+            li.appendChild(numberCell);
+            const clueCell = document.createElement('span');
+            const obj = clues[direction][clueNumber];
+            const clueText = document.createTextNode(`${Object.values(obj)[0]}`);
+            clueCell.setAttribute('data-clue-index', `${clueNumber}`);
+            numberCell.setAttribute('data-clue-index', `${clueNumber}`);
+            clueCell.appendChild(clueText);
+            li.appendChild(clueCell)
+            ol.appendChild(li);
+        }
+        return ol;
+    }
 
-    //         const li = document.createElement('li');
-    //         li.setAttribute('data-li-clue-index', `${clueNumber}`);
-    //         const numberCell = document.createElement('span');
-    //         let numberText
-    //         if (useTouch) {
-    //             numberText = document.createTextNode(`${clueNumber}${direction[0]}`);
-    //         } else {
-    //             numberText = document.createTextNode(`${clueNumber}`);
-    //         }
-    //         numberCell.appendChild(numberText);
-    //         li.appendChild(numberCell);
-    //         const clueCell = document.createElement('span');
-    //         const obj = clues[direction][clueNumber];
-    //         const clueText = document.createTextNode(`${Object.values(obj)[0]}`);
-    //         clueCell.setAttribute('data-clue-index', `${clueNumber}`);
-    //         numberCell.setAttribute('data-clue-index', `${clueNumber}`);
-    //         clueCell.appendChild(clueText);
-    //         li.appendChild(clueCell)
-    //         ol.appendChild(li);
-    //     }
-    //     return ol;
-    // }
+    function activateFromCluesList(evt, parent, actionInstance) {
+        const target = evt.target;
+        const clueNumber = target.getAttribute('data-clue-index');
 
-    // function activateFromCluesList(evt, parent, actionInstance) {
-    //     const target = evt.target;
-    //     const clueNumber = target.getAttribute('data-clue-index');
+        if (!clueNumber) {
+            return;
+        }
 
-    //     if (!clueNumber) {
-    //         return;
-    //     }
+        // @TODO change directly the actionInstace directin from here??
+        const direction = parent.getAttribute('data-dir');
 
-    //     // @TODO change directly the actionInstace directin from here??
-    //     const direction = parent.getAttribute('data-dir');
+        if (actionInstance.selectedClue && actionInstance.selectedClue == `${direction}-${clueNumber}`) {
+            return;
+        }
 
-    //     if (actionInstance.selectedClue && actionInstance.selectedClue == `${direction}-${clueNumber}`) {
-    //         return;
-    //     }
+        actionInstance.updateCluesList(clueNumber, direction, true);
+    }
 
-    //     actionInstance.updateCluesList(clueNumber, direction, true);
-    // }
+    function displayDesktopClues(clues, actionInstance) {
+        const section = shadowRoot.querySelector('section[aria-label="puzzle clues"]');
+        const sectionDiv = shadowRoot.querySelector('section .scrolls');
+        const activationFunction = function (evt) {
+            const parentElement = this;
+            activateFromCluesList(evt, parentElement, actionInstance);
+        };
 
-    // function displayDesktopClues(clues, actionInstance) {
-    //     const section = shadowRoot.querySelector('section[aria-label="puzzle clues"]');
-    //     const sectionDiv = shadowRoot.querySelector('section .scrolls');
-    //     const activationFunction = function (evt) {
-    //         const parentElement = this;
-    //         activateFromCluesList(evt, parentElement, actionInstance);
-    //     };
+        for (let direction in clues) {
+            const div = document.createElement('div');
+            const header = document.createElement('h4')
+            const headerTitle = document.createTextNode(`${direction}`);
+            header.appendChild(headerTitle);
+            div.appendChild(header);
 
-    //     for (let direction in clues) {
-    //         const div = document.createElement('div');
-    //         const header = document.createElement('h4')
-    //         const headerTitle = document.createTextNode(`${direction}`);
-    //         header.appendChild(headerTitle);
-    //         div.appendChild(header);
+            const list = createCluesList(clues, direction);
 
-    //         const list = createCluesList(clues, direction);
+            div.appendChild(list);
+            sectionDiv.appendChild(div);
 
-    //         div.appendChild(list);
-    //         sectionDiv.appendChild(div);
+            if (window.PointerEvent) {
+                list.addEventListener('pointerdown', activationFunction, true);
+            } else {
+                list.addEventListener('touchstart', activationFunction, true);
+                list.addEventListener('mousedown', activationFunction, true)
+            }
+        }
 
-    //         if (window.PointerEvent) {
-    //             list.addEventListener('pointerdown', activationFunction, true);
-    //         } else {
-    //             list.addEventListener('touchstart', activationFunction, true);
-    //             list.addEventListener('mousedown', activationFunction, true)
-    //         }
-    //     }
-
-    //     sectionDiv.removeAttribute('hidden');
-    //     section.removeAttribute('hidden');
-    // }
-
+        sectionDiv.removeAttribute('hidden');
+        section.removeAttribute('hidden');
+    }
    
-
 
     function initializeView(actionInstance) {
         // set initial active cell

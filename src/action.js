@@ -8,7 +8,7 @@ const { ACROSS, DOWN, isSameCell } = Variable;
 
 export class Action {
 
-    constructor(crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot) {
+    constructor(crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot, solution) {
         this.crossword = crossword;
         this.rafPending = false;
 
@@ -25,6 +25,17 @@ export class Action {
        
         this.handleActivationOnEnd;
         this.selectedClue;
+
+        this.solution = new Map();
+        for (let v of crossword.variables) {
+            const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
+            if(solution && solution.has(key)) {
+                this.solution.set(key, solution.get(key));
+            } else {
+                this.solution.set(key, [...v.cells]);
+            }
+        }
+        console.log(this.solution);
     }
 
 

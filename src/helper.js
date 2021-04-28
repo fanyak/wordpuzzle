@@ -139,3 +139,9 @@ export function removeSymmetricConstraints(constraints, width, height) {
   return new Set(cp);
 }
 
+
+export function removeAllChildNodes(parent) {
+  while (parent.firstChild) {
+      parent.removeChild(parent.firstChild);
+  }
+}

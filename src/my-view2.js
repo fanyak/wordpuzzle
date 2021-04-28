@@ -386,6 +386,8 @@ class MyView2 extends PolymerElement {
     this.actionInstance;
     this.gridFile;
     this.constraints;
+    this.solution = new Map();
+    this.clues = {};
   }
  
   ready() {
@@ -453,11 +455,17 @@ class MyView2 extends PolymerElement {
     Promise.all([import('./component.js'), import('./helper.js')])
     .then(([view, helper]) => {
 
+      this.helper = helper;
+
       // clear any contents of the svg
       const svg = this.shadowRoot.querySelector('svg');
       const scrolls = this.shadowRoot.querySelector('.scrolls');
+
+      // this keeps the eventlistener on svg?
       svg.parentNode.replaceChild(svg.cloneNode(false), svg);
-      scrolls.innerHtml = ""; 
+
+      // this will remove childNodes AND their eventListeners! (innerHTML doesn't remove the eventListeners)
+      this.helper.removeAllChildNodes(scrolls);
 
       // remove previous listeners
       if(this.dependencies) {
@@ -471,9 +479,7 @@ class MyView2 extends PolymerElement {
       
       const elements = Array.prototype.slice.call(this.$.dimentions.elements, 0);
       const [selectedDimElement]  = elements.filter((el) => el.type == 'hidden');
-      const dim = parseInt(selectedDimElement.value)
-
-      this.helper = helper;
+      const dim = parseInt(selectedDimElement.value);
 
       this.$.puzzle.removeAttribute('hidden');
       let crossword;      
@@ -481,15 +487,14 @@ class MyView2 extends PolymerElement {
         crossword = this.actionInstance.crossword;
       }
 
-      return view.init(this.shadowRoot, [dim,dim], crossword, this.gridFile, this.constraints); 
-
-    }).then(({dependencies, actionInstance}) => {
+      return view.init(this.shadowRoot, [dim,dim], crossword, this.gridFile, this.constraints, this.solution, this.clues);
+    })
+    .then(({dependencies, actionInstance}) => {
       console.log(dependencies, actionInstance)
       this.actionInstance = actionInstance;
       this.dependencies = dependencies;
-      
       // if we fetched the grid and haven't saved it yet
-      this.constraints = [...actionInstance.crossword.constraints]; 
+      this.constraints = [...actionInstance.crossword.constraints];       
     });   
 
   }
