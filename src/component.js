@@ -1,5 +1,5 @@
 import { Crossword, Variable } from './cross.js';
-import { not, createUserActivationAction, createUserActionEnd, mapCellInVariable } from './helper.js';
+import { not, createUserActivationAction, createUserActionEnd, mapCellInVariable, createSymmetricConstraints, removeSymmetricConstraints } from './helper.js';
 import { Action } from './action.js';
 import { createKeys, extractKeyEvent, toggleKeyPressClass } from './keyboard.js';
 
@@ -7,17 +7,32 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
 
     // const crosswordDimentions = [15, 15];
 
-    const rootUrl = 'http://localhost:3000/'; // @TODO change to CDN?
+    // @TODO change to CDN?
+    const rootUrl = 'http://localhost:3000/';
 
+    const headers = { 
+        mode: 'cors', // request to a server of another origin if we are at a cdn
+        cache: 'no-store', // *default, no-cache, reload, force-cache, only-if-cached       
+        headers: {
+        'Content-Type': 'application/json'
+        }
+    }
+
+    const reqHeaders = [];
+
+    // @TODO this is an input from the element
     const gridFiles = gridFile ? [`api/grids/${gridFile}`] : ['api/grids/empty'];
+    const gridReqOptions = { method: 'GET', ...headers}; // gridFile ? { method: 'GET', ...headers} : {method: 'POST', ...headers} ;
+    reqHeaders.push(gridReqOptions);
 
     // if we haven't already fetched the words
     if(!crossword) {
       gridFiles.push('api/words');
+      reqHeaders.push({ method: 'GET', ...headers});
     }
 
     const fetchFiles = gridFiles.map((req) => `${rootUrl}${req}`);
-    // const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
+    const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
     
     // @TODO how dow we choose size?
     const gridSpan = 495;
@@ -42,32 +57,42 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
     const main = shadowRoot.querySelector('main');
     const svg = shadowRoot.querySelector('svg');
     const board = shadowRoot.querySelector('.board');
-    const keyboard = shadowRoot.querySelector('.keyboard');
-    const touchControls = shadowRoot.querySelector('.touchControls');
 
-    // initial check for displaying a virtual keyboard, 
-    // must change if there is touch BUT also a physical keyboard
-    let useTouch = navigator.maxTouchPoints > 0; // || window.screen.width < 700;  @TODO orientation change
-    let checkedKeyboardAPI = false;
-    if (useTouch) {
-        main.classList.add('touch');
-    }
-
+    const dependencies = {listeners: []} // {target: fn}
+   
     //@TODO we don't need the vocab file for displaying a generated crossword
     let promise;
-    if(!crossword && !constraints) { // fetch both words and grid (either given grid or empty)
-        promise = Promise.all(fetchFiles.map(file => fetch(file)))
+    // first check that we haven't saved the constraints or haven't added any constraints
+    if(!crossword && !constraints) { 
+        // fetch both words and grid (either given grid or empty)
+        promise = Promise.all(fetchFiles.map((file,indx) => fetch(file, reqHeaders[indx])))
         .then(responses => Promise.all(responses.map(response => response.json())));
-    } else if (!crossword && constraints) { // fetch only the words
-        promise = fetch(fetchFiles[1])
+
+        // @TODO we must store the id of the grid if we created one!!!!  DON'T CREATE ONE UNITL WE SAVE
+
+    } else if (!crossword && constraints) { 
+        // we have the constraints
+        // fetch only the words
+        constraints = Array.from(createSymmetricConstraints([...constraints], ...crosswordDimentions));
+        promise = fetch(fetchFiles[1], reqHeaders[1])
         .then(response => response.json())
         .then((words) => [{constraints}, words]);
     } else if (!constraints) { // we have the words, fetch the grid (either given or empty)
-        promise = fetch(fetchFiles[0])
+        promise = fetch(fetchFiles[0], reqHeaders[0])
         .then(response => response.json())
-        .then((structure) => [structure, crossword.words]);
-    } else {
-        promise = Promise([{constraints}, crossword.words]);
+        .then((structure) => [structure, {vocab:crossword.words}]);
+        // @TODO we must store the id of the grid if we created one - DON'T CREATE ONE UNITL WE SAVE !!!!
+
+    } else { // we have the constraints and the crossword => resolve promise
+        console.log('remove', constraints,crossword.constraints);
+        if(constraints.length >= crossword.constraints.length) {
+            // we have added constraints => we need tocreate symmetry
+            constraints = Array.from(createSymmetricConstraints([...constraints], ...crosswordDimentions));
+        } else {
+            // we have removed constraints => must also remove the symmetrical
+            constraints = Array.from(removeSymmetricConstraints([...constraints], ...crosswordDimentions))
+        }
+        promise = Promise.resolve([{constraints}, {vocab:crossword.words}]);
     }
 
     return promise
@@ -79,15 +104,16 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
         .catch((err) => {
             console.log(err); // @ TODO handle the error
         })
-        .then((actionInstance) =>
-        //     Promise.all(solutionFiles.map(file => fetch(file)))
-        //         // create clusure for actionInstance
-        //         .then(responses => Promise.all(responses.map(response => response.json())))
-        //         .then(data => getClues(data))
-        //         .then(clues => displayClues(clues, actionInstance))
-        //         .then((actionInstance) => initializeView(actionInstance))
-            initializeView(actionInstance)
-         )
+        // .then((actionInstance) =>
+        //     Promise.all(solutionFiles.map(file => fetch(file, { method: 'GET', ...headers})))
+        //         // // // create clusure for actionInstance
+        //         // // .then(responses => Promise.all(responses.map(response => response.json())))
+        //         // // .then(data => getClues(data))
+        //         // // .then(clues => displayClues(clues, actionInstance))
+        //         // .then((actionInstance) => initializeView(actionInstance))
+        //  )
+        .then((actionInstance) => initializeView(actionInstance))
+        .then((actionInstance) => ({dependencies, actionInstance}))
         .catch((err) => {
             console.log(err);
         });
@@ -166,8 +192,6 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
                 wordIndex.setAttributeNS(null, 'stroke-width', '0.2');
                 wordIndex.setAttributeNS(null, 'style', `font-size: ${indexSize}px`);
 
-
-
                 const letter = document.createElementNS(svgNamespace, 'text');
                 letter.setAttributeNS(null, 'x', (j * cellSize) + padding + cellSize / 2);
                 letter.setAttributeNS(null, 'y', (i * cellSize) + padding + letterPaddingTop);
@@ -192,57 +216,45 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
                 cellIdToVariableDict[`cell-id-${i * crossword.width + j}`] = {};
 
                 // if we have set constraints
-                if (crossword.structure.filter( (row) => row.find((c) => !c) ).length) {
-
-                    if (!row[j]) {
-                        rectWidth = cellSize, rectHeight = rectWidth;
-                        cell.setAttributeNS(null, 'x', (j * cellSize) + padding);
-                        cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
-                        cell.setAttributeNS(null, 'fill', '#333');
-                        cell.classList.add('black');
-                    } else {
-                        // get ALL the words in ALL the directions to which this cell belongs
-                        variables.forEach((v) => {
-                            const cellIndex = v.cells.findIndex(cell => Variable.isSameCell(cell, [i, j]));
-                            if (cellIndex > -1) {
-                                // set the data-variable attribute for each direction that the cell exists in a word
-                                cell.setAttributeNS(null, `data-variable-${v.direction}`, `${v.i}-${v.j}`);
-                                // complete the celId map
-                                cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][v.direction] =
-                                    { 'variable': v, 'cellNumber': cellIndex, 'letter': null, 'isStartOfWord': cellIndex == 0 };
-                                return true;
-                            }
-                            return false;
-                        });
-
-                        rectWidth = cellSize, rectHeight = rectWidth; // account for stroke width of the grid
-                        cell.setAttributeNS(null, 'x', (j * cellSize) + padding); // account for stroke width of the grid
-                        cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
-                        cell.setAttributeNS(null, 'fill', '#fff'); // should be transparent? => fill = none
-
-                        //@TODO: precalculate this??? ([direction[counter]: ])
-                        
-                        const startOfWordVariable = variables.find(v => v.i == i && v.j == j);
-                        if (startOfWordVariable) {
-                            wordIndex.textContent = counter;
-                            startOfWordCells.push({ cell, startOfWordVariable });
-                            counter++;
-                        }
-
-                    }
+                //console.log(crossword.structure[i].findIndex((c) => !c) > -1);
+                
+                if (!row[j]) {
+                    rectWidth = cellSize, rectHeight = rectWidth;
+                    cell.setAttributeNS(null, 'x', (j * cellSize) + padding);
+                    cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
+                    cell.setAttributeNS(null, 'fill', '#333');
+                    cell.classList.add('black');
                 } else {
-                    cell.setAttributeNS(null, `data-variable-${Variable.ACROSS}`, `${i}-${j}`);
-                    cell.setAttributeNS(null, `data-variable-${Variable.DOWN}`, `${i}-${j}`);
-                    // complete the celId map
-                    cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][Variable.ACROSS] =
-                        { 'variable': new Variable(i,j,Variable.ACROSS, 1), 'cellNumber': 0, 'letter': null, 'isStartOfWord': 0 };
-                    cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][Variable.DOWN] =
-                    { 'variable': new Variable(i,j,Variable.DOWN, 1), 'cellNumber': 0, 'letter': null, 'isStartOfWord': 0 };
+                    // get ALL the words in ALL the directions to which this cell belongs
+                    variables.forEach((v) => {
+                        const cellIndex = v.cells.findIndex(cell => Variable.isSameCell(cell, [i, j]));
+                        if (cellIndex > -1) {
+                            // set the data-variable attribute for each direction that the cell exists in a word
+                            cell.setAttributeNS(null, `data-variable-${v.direction}`, `${v.i}-${v.j}`);
+                            // complete the celId map
+                            cellIdToVariableDict[`cell-id-${i * crossword.width + j}`][v.direction] =
+                                { 'variable': v, 'cellNumber': cellIndex, 'letter': null, 'isStartOfWord': cellIndex == 0 };
+                            return true;
+                        }
+                        return false;
+                    });
+
                     rectWidth = cellSize, rectHeight = rectWidth; // account for stroke width of the grid
                     cell.setAttributeNS(null, 'x', (j * cellSize) + padding); // account for stroke width of the grid
                     cell.setAttributeNS(null, 'y', (i * cellSize) + padding);
                     cell.setAttributeNS(null, 'fill', '#fff'); // should be transparent? => fill = none
+
+                    //@TODO: precalculate this??? ([direction[counter]: ])
+                    
+                    const startOfWordVariable = variables.find(v => v.i == i && v.j == j);
+                    if (startOfWordVariable) {
+                        wordIndex.textContent = counter;
+                        startOfWordCells.push({ cell, startOfWordVariable });
+                        counter++;
+                    }
+
                 }
+                
 
                 cell.setAttributeNS(null, 'width', cellSize);
                 cell.setAttributeNS(null, 'height', cellSize);
@@ -270,8 +282,6 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
         const action = new Action(crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot);
         const activate = action.activate.bind(action);
         const keydown = action.keydown.bind(action);
-        const touchAction = action.touchAction.bind(action, board);
-        const reset = action.reset.bind(action, board);
 
         const cell = shadowRoot.querySelector('#cell-id-0');
 
@@ -286,17 +296,16 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
             svg.addEventListener('touchstart', activate, true);
             svg.addEventListener('mousedown', activate, true);
         }
+        dependencies.listeners.push(new Map([[svg, [createUserActivationAction(), activate]]]));
 
-        // @ TODO: DO we need this when we have a touch screen?
-        // Trap device Keyboard  Events!
-        document.addEventListener('keydown', (evt) => {
+        const keydownListener  = function f(action, evt) {
             evt.preventDefault();
             // @ TODO replace the target check if it is out of functional elements
-            if (!action.selected && evt.key == 'Tab') {
-                // send the activation event to parent (svg) via the child (cell)          
-                cell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true }));
-                return;
-            }
+            // if (!action.selected && evt.key == 'Tab') {
+            //     // send the activation event to parent (svg) via the child (cell)          
+            //     cell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true }));
+            //     return;
+            // }
             if (action.selected) {
                 const { key, code, type, shiftKey } = evt;
                 // send Sythesized event      
@@ -305,107 +314,17 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
             }
 
             //If a keydown event has been sent, then the user has keyboard => we can remove virtual keyboard and touch
-            main.classList.remove('touch'); // ??????????????
-            useTouch = false;
-
-        }, true);
-
-        // treat move event as initial touch
-
-        board.addEventListener('touchmove', touchAction, true);// for zooming
-        board.addEventListener('touchend', reset, true);
-
-        // hanlde Move Actions for Pens on touch-enabled screens
-        if (window.PointerEvent && useTouch) {
-
-            // Add Pointer Event Listener for touch screens AND input devices other than touch (like pen)
-            const penEventHandler = (evt) => {
-
-                // https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent/pointerType - touch, mouse, pen
-                if (evt.pointerType == 'pen') {
-
-                    if (evt.type == 'pointermove') {
-                        evt.target.setPointerCapture(evt.pointerId);
-                        touchAction(evt);
-                    }
-                    if (evt.type == 'pointerup') {
-                        evt.target.releasePointerCapture(evt.pointerId);
-                        reset(evt);
-                    }
-
-                }
-            }
-
-            board.addEventListener('pointermove', penEventHandler, true);
-            board.addEventListener('pointerup', penEventHandler, true);
-        }
-
+            
+        }.bind(null, action);
+        // @ TODO: DO we need this when we have a touch screen?
+        // Trap device Keyboard  Events!
+        document.addEventListener('keydown', keydownListener, true);
+        dependencies.listeners.push(new Map([[document, ['keydown', keydownListener]]]));
         // return the action instance 
         return action;
     }
 
-    async function displayKeyboard(actionInstance) {
-
-        // check for physical keyboard - if it exists, don't use virtual keyboard FOR KEYDOWN ACTION
-        // BUT what if it is a touch device that can be connected to a physical keyboard? ex microsoft surface????
-
-        // Solution for Touch Enabled Devices that also have a physical keyboard connected    
-        // Navigator.keyboard API works for DESKTOP Chrome, Edge, Opera  
-
-        // AWAIT to find if there is a keyboard
-        // Check if it is touch enabled AND is Desktop that supports the Keyboard API
-        if (useTouch && navigator.keyboard) {
-            // If the'navigator.keyboard' property is supported by the browser
-            useTouch = checkedKeyboardAPI ? useTouch : await navigator.keyboard.getLayoutMap()
-                .then(map => !Boolean(map.size)); // uses keyboard
-            checkedKeyboardAPI = true;
-        }
-
-        if (!useTouch) {
-            // browser supports multi-touch
-            main.classList.remove('touch')
-
-
-        } else {
-            main.classList.add('touch');
-
-            console.log('touch');
-
-            // Manage keyDown events on the virtual keyboard        
-            const keydown = actionInstance.keydown.bind(actionInstance);
-            const moveIntoView = actionInstance.moveIntoView.bind(actionInstance);
-            const reset = actionInstance.reset.bind(actionInstance, board);
-
-
-            const handleKeyEvent = (evt) => {
-
-                // handle virtual keyboar animations
-                evt.target.addEventListener('animationend', toggleKeyPressClass, true);
-
-                keydown(extractKeyEvent(evt)); // syncrhronous event inside the eventCallback
-                // have to reset after moveIntoView
-                moveIntoView(board); // move to where the keydown event happend if we have zoomed
-            };
-
-            Promise.resolve(createKeys(keyboard))
-                .then((_) => {
-                    // Add crossword keyboard Events for touch devices that don't have keyboard
-                    if (window.PointerEvent) {
-                        // Add Pointer Event Listener                    
-                        keyboard.addEventListener('pointerdown', handleKeyEvent, true);
-                    } else {
-                        // add Touch Event Listener
-                        keyboard.addEventListener('touchstart', handleKeyEvent, true);
-                        //might be using a mouse with a touch enambled device that doesn't use a keyboard? eg. Microsoft surface?
-                        keyboard.addEventListener('mousedown', handleKeyEvent, true);
-                    }
-
-                }).catch(console.error);
-        }
-
-        return actionInstance;
-
-    }
+ 
 
     // @TODO Move to generation files!!!!!!!!!!!!!! 
     function getClues([{ solution }, { clues }]) {
@@ -423,144 +342,97 @@ export function init(shadowRoot, crosswordDimentions, crossword, gridFile, const
         return allClues;
     }
 
-    function displayClues(clues, actionInstance) {
-        console.log(clues)
-        if (!useTouch) {
-            displayDesktopClues(clues, actionInstance);
-        } else {
-            displayTouchClues(clues, actionInstance);
-        }
+    // function displayClues(clues, actionInstance) {
+    //     console.log(clues)
+    //     if (!useTouch) {
+    //         displayDesktopClues(clues, actionInstance);
+    //     } else {
+    //         displayTouchClues(clues, actionInstance);
+    //     }
 
-        return actionInstance;
-    }
+    //     return actionInstance;
+    // }
 
-    function createCluesList(clues, direction) {
-        const ol = document.createElement('ol');
-        ol.setAttribute('data-dir', direction);
+    // function createCluesList(clues, direction) {
+    //     const ol = document.createElement('ol');
+    //     ol.setAttribute('data-dir', direction);
 
-        for (let clueNumber in clues[direction]) {
+    //     for (let clueNumber in clues[direction]) {
 
-            const li = document.createElement('li');
-            li.setAttribute('data-li-clue-index', `${clueNumber}`);
-            const numberCell = document.createElement('span');
-            let numberText
-            if (useTouch) {
-                numberText = document.createTextNode(`${clueNumber}${direction[0]}`);
-            } else {
-                numberText = document.createTextNode(`${clueNumber}`);
-            }
-            numberCell.appendChild(numberText);
-            li.appendChild(numberCell);
-            const clueCell = document.createElement('span');
-            const obj = clues[direction][clueNumber];
-            const clueText = document.createTextNode(`${Object.values(obj)[0]}`);
-            clueCell.setAttribute('data-clue-index', `${clueNumber}`);
-            numberCell.setAttribute('data-clue-index', `${clueNumber}`);
-            clueCell.appendChild(clueText);
-            li.appendChild(clueCell)
-            ol.appendChild(li);
-        }
-        return ol;
-    }
+    //         const li = document.createElement('li');
+    //         li.setAttribute('data-li-clue-index', `${clueNumber}`);
+    //         const numberCell = document.createElement('span');
+    //         let numberText
+    //         if (useTouch) {
+    //             numberText = document.createTextNode(`${clueNumber}${direction[0]}`);
+    //         } else {
+    //             numberText = document.createTextNode(`${clueNumber}`);
+    //         }
+    //         numberCell.appendChild(numberText);
+    //         li.appendChild(numberCell);
+    //         const clueCell = document.createElement('span');
+    //         const obj = clues[direction][clueNumber];
+    //         const clueText = document.createTextNode(`${Object.values(obj)[0]}`);
+    //         clueCell.setAttribute('data-clue-index', `${clueNumber}`);
+    //         numberCell.setAttribute('data-clue-index', `${clueNumber}`);
+    //         clueCell.appendChild(clueText);
+    //         li.appendChild(clueCell)
+    //         ol.appendChild(li);
+    //     }
+    //     return ol;
+    // }
 
-    function activateFromCluesList(evt, parent, actionInstance) {
-        const target = evt.target;
-        const clueNumber = target.getAttribute('data-clue-index');
+    // function activateFromCluesList(evt, parent, actionInstance) {
+    //     const target = evt.target;
+    //     const clueNumber = target.getAttribute('data-clue-index');
 
-        if (!clueNumber) {
-            return;
-        }
+    //     if (!clueNumber) {
+    //         return;
+    //     }
 
-        // @TODO change directly the actionInstace directin from here??
-        const direction = parent.getAttribute('data-dir');
+    //     // @TODO change directly the actionInstace directin from here??
+    //     const direction = parent.getAttribute('data-dir');
 
-        if (actionInstance.selectedClue && actionInstance.selectedClue == `${direction}-${clueNumber}`) {
-            return;
-        }
+    //     if (actionInstance.selectedClue && actionInstance.selectedClue == `${direction}-${clueNumber}`) {
+    //         return;
+    //     }
 
-        actionInstance.updateCluesList(clueNumber, direction, true);
-    }
+    //     actionInstance.updateCluesList(clueNumber, direction, true);
+    // }
 
-    function displayDesktopClues(clues, actionInstance) {
-        const section = shadowRoot.querySelector('section[aria-label="puzzle clues"]');
-        const sectionDiv = shadowRoot.querySelector('section .scrolls');
-        const activationFunction = function (evt) {
-            const parentElement = this;
-            activateFromCluesList(evt, parentElement, actionInstance);
-        };
+    // function displayDesktopClues(clues, actionInstance) {
+    //     const section = shadowRoot.querySelector('section[aria-label="puzzle clues"]');
+    //     const sectionDiv = shadowRoot.querySelector('section .scrolls');
+    //     const activationFunction = function (evt) {
+    //         const parentElement = this;
+    //         activateFromCluesList(evt, parentElement, actionInstance);
+    //     };
 
-        for (let direction in clues) {
-            const div = document.createElement('div');
-            const header = document.createElement('h4')
-            const headerTitle = document.createTextNode(`${direction}`);
-            header.appendChild(headerTitle);
-            div.appendChild(header);
+    //     for (let direction in clues) {
+    //         const div = document.createElement('div');
+    //         const header = document.createElement('h4')
+    //         const headerTitle = document.createTextNode(`${direction}`);
+    //         header.appendChild(headerTitle);
+    //         div.appendChild(header);
 
-            const list = createCluesList(clues, direction);
+    //         const list = createCluesList(clues, direction);
 
-            div.appendChild(list);
-            sectionDiv.appendChild(div);
+    //         div.appendChild(list);
+    //         sectionDiv.appendChild(div);
 
-            if (window.PointerEvent) {
-                list.addEventListener('pointerdown', activationFunction, true);
-            } else {
-                list.addEventListener('touchstart', activationFunction, true);
-                list.addEventListener('mousedown', activationFunction, true)
-            }
-        }
+    //         if (window.PointerEvent) {
+    //             list.addEventListener('pointerdown', activationFunction, true);
+    //         } else {
+    //             list.addEventListener('touchstart', activationFunction, true);
+    //             list.addEventListener('mousedown', activationFunction, true)
+    //         }
+    //     }
 
-        sectionDiv.removeAttribute('hidden');
-        section.removeAttribute('hidden');
-    }
+    //     sectionDiv.removeAttribute('hidden');
+    //     section.removeAttribute('hidden');
+    // }
 
-    function displayTouchClues(clues, actionInstance) {
-        const cluesDiv = shadowRoot.querySelector('.touchClues');
-        const cluesText = shadowRoot.querySelector('.clueText .textContainer');
-        const [leftnav, rightnav] = shadowRoot.querySelectorAll('.touchClues .chevron');
-
-        const changeDirectionFunction = actionInstance.changeDirection.bind(actionInstance, actionInstance.selected);
-        const keydown = actionInstance.keydown.bind(actionInstance);
-        const moveIntoView = actionInstance.moveIntoView.bind(actionInstance)
-        const reset = actionInstance.reset.bind(actionInstance, board);
-
-
-        const navigationFunction = function (evt) {
-            evt.preventDefault();
-            // synthesized event: {key, code, type, shiftKey}       
-            const synthesizedEvent = { key: 'Tab', code: 'Tab', type: evt.type, shiftKey: evt.target == leftnav };
-
-            // closure
-            keydown(synthesizedEvent); // this should be synchronously dispatched!
-
-            // the selected cell sould be set synchronously by the syncrhonous keydown call above
-            moveIntoView(board);
-        };
-
-        for (let direction in clues) {
-            const list = createCluesList(clues, direction);
-
-            cluesText.appendChild(list);
-
-            if (window.PointerEvent) {
-                list.addEventListener('pointerdown', changeDirectionFunction, true);
-            } else {
-                list.addEventListener('touchstart', changeDirectionFunction, true);
-                list.addEventListener('mousedown', changeDirectionFunction, true);
-            }
-        }
-
-        // add navigation action from chevrons
-        if (window.PointerEvent) {
-            leftnav.addEventListener('pointerdown', navigationFunction, true);
-            rightnav.addEventListener('pointerdown', navigationFunction, true);
-        } else {
-            leftnav.addEventListener('touchstart', navigationFunction, true);
-            rightnav.addEventListener('touchstart', navigationFunction, true);
-            leftnav.addEventListener('mousedown', navigationFunction, true);
-            rightnav.addEventListener('mousedown', navigationFunction, true);
-        }
-
-    }
+   
 
 
     function initializeView(actionInstance) {

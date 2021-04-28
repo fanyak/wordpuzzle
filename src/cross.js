@@ -65,15 +65,15 @@ Variable.isSameCell = (cell1, cell2) => {
 class Crossword {
     constructor(structure, words, height, width) {
         //  Determine structure of crossword      
-        const constraints = structure.constraints;
-        // console.log(constraints)
+        this.constraints = structure.constraints;
+        // console.log(this.constraints)
         this.height = height;
         this.width = width;
         this.structure = [];
         for (let i = 0; i < this.height; i++) {
             const row = [];
             for (let j = 0; j < this.width; j++) {
-                if (constraints.find(val => val == i * this.width + j + 1)) {
+                if (this.constraints.find(val => val == i * this.width + j + 1)) {
                     row.push(false);
                 } else {
                     row.push(true);

@@ -349,7 +349,7 @@ class MyView2 extends PolymerElement {
         <main id='puzzle' tabindex="0" hidden>
 
           <div id="toolbar">
-            <button id="new-grid" type="button" data-tooltip="New puzzle">&#9632;</button>
+            <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
           </div>
 
           <div class="container">
@@ -413,14 +413,12 @@ class MyView2 extends PolymerElement {
   }
 
   handleKeydown(evt) {
-    console.log(evt)
     const width = this.$.dimentions.elements.width;
     const height = this.$.dimentions.elements.height;
     let value;
 
     const update = () => {
-      console.log(value)
-      value = width.value;
+     value = width.value;
       // console.log(value, width.max, width.min, value <= parseInt(width.max), value >= parseInt(width.min))
       if( (value <= parseInt(width.max)) && (value >= parseInt(width.min))) {
         height.value = value;
@@ -444,36 +442,76 @@ class MyView2 extends PolymerElement {
 
   handleSubmit(evt) {
     evt.preventDefault();
-    this.createView();
     // clear previously created content
-    
+    this.actionInstance = null;
+    this.constraints = null;   
+    this.createView();    
   }
 
-  createView() {
-    const svg = this.shadowRoot.querySelector('svg');
-    const scrolls = this.shadowRoot.querySelector('.scrolls');
-
-    // clear any contents of the svg
-    svg.parentNode.replaceChild(svg.cloneNode(false), svg);
-    scrolls.innerHtml = "";
-
+  createView() { 
     // is this only imported once?
-    Promise.all([import('./component.js')])
-    .then(([view]) => {
+    Promise.all([import('./component.js'), import('./helper.js')])
+    .then(([view, helper]) => {
+
+      // clear any contents of the svg
+      const svg = this.shadowRoot.querySelector('svg');
+      const scrolls = this.shadowRoot.querySelector('.scrolls');
+      svg.parentNode.replaceChild(svg.cloneNode(false), svg);
+      scrolls.innerHtml = ""; 
+
+      // remove previous listeners
+      if(this.dependencies) {
+        for (let listener of this.dependencies.listeners) {
+          // listener is a map
+          const iterator = listener.entries();
+          const [target, [type, fn]] = iterator.next().value;
+          target.removeEventListener(type, fn, true);
+        }
+      }
+      
       const elements = Array.prototype.slice.call(this.$.dimentions.elements, 0);
       const [selectedDimElement]  = elements.filter((el) => el.type == 'hidden');
       const dim = parseInt(selectedDimElement.value)
+
+      this.helper = helper;
+
       this.$.puzzle.removeAttribute('hidden');
       let crossword;      
       if(this.actionInstance) {
         crossword = this.actionInstance.crossword;
       }
-      // this is a promise that resolves to actionInstance
+
       return view.init(this.shadowRoot, [dim,dim], crossword, this.gridFile, this.constraints); 
-    }).then((actionInstance) => this.actionInstance = actionInstance);   
+
+    }).then(({dependencies, actionInstance}) => {
+      console.log(dependencies, actionInstance)
+      this.actionInstance = actionInstance;
+      this.dependencies = dependencies;
+      
+      // if we fetched the grid and haven't saved it yet
+      this.constraints = [...actionInstance.crossword.constraints]; 
+    });   
 
   }
 
+  toggleConstraint(evt) {
+    const selected = this.actionInstance.selected;
+    const cellId = this.helper.getCellNumber(selected);
+   
+    // toggle     
+    if(this.constraints) {
+      const existingIndex = this.constraints.findIndex((id) => id == cellId + 1);
+      if(existingIndex > -1) {
+        this.constraints.splice(existingIndex, 1);
+      } else {
+        this.constraints.push(cellId + 1);
+      }      
+    } else {
+      this.constraints = [];
+      this.constraints.push(cellId + 1);
+    }
+    this.createView();
+  }
 
 }
 
