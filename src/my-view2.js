@@ -9,19 +9,11 @@
  */
 
 import { PolymerElement, html, } from '@polymer/polymer/polymer-element.js';
+import { touchesDistance } from './helper.js';
 import './shared-styles.js';
 
-class MyView2 extends PolymerElement {
 
-  static get properties() {
-    return {
-      active: {
-        type: Number,
-        reflectToAttribute: true,
-        observer: '_activeChanged'
-      }
-    }
-  }
+class MyView2 extends PolymerElement {
 
   static get template() {
     return html`
@@ -79,6 +71,10 @@ class MyView2 extends PolymerElement {
           max-width: 1150px;
           height: 90vh;
           max-height: 90vh;
+        } 
+
+        main:focus-visible {
+         outline: none !important;
         } 
 
         main > div.container {
@@ -305,15 +301,52 @@ class MyView2 extends PolymerElement {
         
       main:not(.touch) .scrolls:not([hidden]) ol li > span:first-child {
         font-weight: bold;
-        width: 20px;
+        width: 24px;
         text-align: right;
-        margin-right: 5px;
+        padding-right: 5px;
         box-sizing: border-box;
       }
         
       main:not(.touch) .scrolls:not([hidden]) ol li > span:nth-child(2) {
         width: calc(100% - 24px);
       }  
+
+      #toolbar:not([hidden]) {
+        display: flex;
+        width: 530px;
+        flex-direction: row;
+        justify-content: space-between;
+      }
+
+      .clueEdit {
+        display: flex;
+        flex: 1;
+        max-width: 400px;
+        background-color: lightblue;
+        justify-content: space-between;
+        align-items: center;
+        color: #444;
+
+      }
+      .clueEdit span {
+        display: inline-block;
+        width: 80px;
+        padding-left: 5px;
+        font-weight: bold;
+        box-sizing: content-box;
+      }
+
+      .clueText {
+        flex: 1;
+        display: flex;
+        height: 35px;
+        padding-left: 5px;
+        align-items: center;
+        margin-left: 10px;
+        border: solid 1px black;
+        cursor: pointer;
+      }
+
     </style>
 
       <div class="card">
@@ -346,11 +379,18 @@ class MyView2 extends PolymerElement {
 
         </form>
 
-        <main id='puzzle' tabindex="0" hidden>
-
-          <div id="toolbar">
-            <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
+        <div id="toolbar" hidden>
+          <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
+          <div class="clueEdit">
+          <!-- https://polymer-library.polymer-project.org/2.0/docs/devguide/model-data#notify-path-->
+            <span>{{action.selectedClue}}</span>
+            <span>{{action.selectedClueText}}</span>
+            <div contenteditable='true' class="clueText" textContent="{{action.selectedClueText}}"></div>
+            <button on-click ="addClue">Add Clue</button>
           </div>
+        </div>
+
+        <main id='puzzle' tabindex="0" hidden>         
 
           <div class="container">
 
@@ -381,13 +421,27 @@ class MyView2 extends PolymerElement {
     `;
   }
 
+  
+  static get properties() {
+    return {
+      action: {
+        type: Object,
+        value: {selectedClue: 'one'},
+        notify: true,
+        // reflectToAttribute: true,
+        observer: '_activeChanged'
+      }
+    }
+  }
+
   constructor() {
     super();
     this.actionInstance;
-    this.gridFile;
+    this.gridFile = 7;
     this.constraints;
+    // only contain for the updates not the entire lists
     this.solution = new Map();
-    this.clues = {};
+    this.clues = new Map();
   }
  
   ready() {
@@ -452,7 +506,7 @@ class MyView2 extends PolymerElement {
 
   createView() { 
     // is this only imported once?
-    Promise.all([import('./component.js'), import('./helper.js')])
+    return Promise.all([import('./component.js'), import('./helper.js')])
     .then(([view, helper]) => {
 
       this.helper = helper;
@@ -469,12 +523,7 @@ class MyView2 extends PolymerElement {
 
       // remove previous listeners
       if(this.dependencies) {
-        for (let listener of this.dependencies.listeners) {
-          // listener is a map
-          const iterator = listener.entries();
-          const [target, [type, fn]] = iterator.next().value;
-          target.removeEventListener(type, fn, true);
-        }
+        this.toggleDependencies(true);
       }
       
       const elements = Array.prototype.slice.call(this.$.dimentions.elements, 0);
@@ -482,19 +531,28 @@ class MyView2 extends PolymerElement {
       const dim = parseInt(selectedDimElement.value);
 
       this.$.puzzle.removeAttribute('hidden');
+      this.$.toolbar.removeAttribute('hidden');
+
       let crossword;      
       if(this.actionInstance) {
-        crossword = this.actionInstance.crossword;
+        crossword = this.actionInstance.crossword;       
       }
 
-      return view.init(this.shadowRoot, [dim,dim], crossword, this.gridFile, this.constraints, this.solution, this.clues);
+      const component = this;
+      return view.init(component, [dim,dim], crossword);
     })
     .then(({dependencies, actionInstance}) => {
-      console.log(dependencies, actionInstance)
+      // console.log(dependencies, actionInstance)
       this.actionInstance = actionInstance;
       this.dependencies = dependencies;
+
       // if we fetched the grid and haven't saved it yet
-      this.constraints = [...actionInstance.crossword.constraints];       
+      // create a copy
+      this.constraints = [...actionInstance.crossword.constraints]; 
+      // used in HTML    
+      this.action = actionInstance;
+
+      this.manageClicks();
     });   
 
   }
@@ -517,6 +575,71 @@ class MyView2 extends PolymerElement {
     }
     this.createView();
   }
+
+  toggleDependencies(remove){
+    for (let listener of this.dependencies.listeners) {
+      // listener is a map
+      const iterator = listener.entries();
+      const [target, [type, fn]] = iterator.next().value;
+      if(remove){
+        target.removeEventListener(type, fn, true);
+      } else{
+        target.addEventListener(type, fn, true);
+      }
+    }
+  }
+
+  manageClicks() {
+    if(!this.managedClicks) {
+      const clueText = this.shadowRoot.querySelector('.clueText');
+
+      clueText.addEventListener('focus', ()=> {
+        this.toggleDependencies(true)
+      }, true)
+
+      clueText.addEventListener('blur', ()=> {        
+        this.toggleDependencies(false);
+      }, true);
+      
+      this.managedClicks = true;
+    }    
+  }
+
+
+  updateView() {
+    const keepCell = true;
+    return Promise.all([import('./component.js'), import('./helper.js')])
+    .then(([view, helper]) => {
+      this.helper = helper;
+      const component = this;
+      const dim = this.actionInstance.crossword.width;
+      return view.init(component, [dim,dim], this.actionInstance.crossword, keepCell);
+    });
+  }
+  
+  addClue() {
+    const clueText = this.shadowRoot.querySelector('.clueText');
+    const value = clueText.textContent.trim();
+    const cellId = this.actionInstance.selected.id;
+    const direction = this.actionInstance.direction;
+    const v = this.actionInstance.cellIdToVariableDict[`${cellId}`][direction].variable;  
+    const clueKeysArray = Array.from(this.clues.keys());
+    const e = clueKeysArray.find(f => f.equals(v));
+    if(e) {
+      this.clues.set(e, value);
+    }  else {
+      this.clues.set(v, value);
+    }
+    //console.log(this.clues)
+    this.updateView().then(() => {
+      console.log('selected clue', this.action.selectedClueText);
+    });
+  }
+
+  _activeChanged(action) {
+    console.log('active changed');    
+  }
+
 
 }
 

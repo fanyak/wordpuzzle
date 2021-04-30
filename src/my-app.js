@@ -42,6 +42,16 @@ class MyApp extends PolymerElement {
           display: block;
         }
 
+        app-drawer[persistent] {
+          width: var(--app-drawer-width, 206px) !important; 
+        }
+
+        my-view1, my-view2, my-view3 {
+          padding: 0 !important
+        }
+
+        
+
         app-drawer-layout:not([narrow]) [drawer-toggle] {
           display: none;
         }

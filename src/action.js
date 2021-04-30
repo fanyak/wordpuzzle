@@ -8,13 +8,16 @@ const { ACROSS, DOWN, isSameCell } = Variable;
 
 export class Action {
 
-    constructor(crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot, solution) {
+    constructor(component, crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot, solution, clues) {
+
+        this.component = component.bind(component())();
+
         this.crossword = crossword;
         this.rafPending = false;
 
         this.selected;
         this.direction = direction; // initial direction setting
-        this.shadowRoot = shadowRoot;
+        this.shadowRoot = this.component.shadowRoot;
 
         // these are static once the crossword is complete, don't recalculate it every time  
         this.startOfWordCells = startOfWordCells;  // this is ordered by word index for the display cells    
@@ -25,17 +28,31 @@ export class Action {
        
         this.handleActivationOnEnd;
         this.selectedClue;
+        this.selectedClueText;
 
         this.solution = new Map();
+        this.clues = new Map();
+
+        const solutionKeysArray = Array.from(this.component.clues.keys())
+        const clueKeysArray = Array.from(this.component.clues.keys())
+
         for (let v of crossword.variables) {
-            const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
-            if(solution && solution.has(key)) {
-                this.solution.set(key, solution.get(key));
+
+            const solutionKey =solutionKeysArray.find((f) =>f.equals(v));
+            const clueKey = clueKeysArray.find((f) =>f.equals(v));
+
+            // const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
+            if(solutionKey) {
+                this.solution.set(v, this.component.solution.get(v));
             } else {
-                this.solution.set(key, [...v.cells]);
+                this.solution.set(v, [...v.cells]);
+            }
+            if(clueKey) {
+                this.clues.set(v, this.component.clues.get(clueKey));
+            } else {
+                this.clues.set(v, "");
             }
         }
-        console.log(this.solution);
     }
 
 
@@ -212,22 +229,24 @@ export class Action {
             // // In the 2nd case, we have to switch direction to get the only direction in which the selected belongs
             // // the the 1st case, we may want to remove the black cell and that's why we clicked
             if (!getCellVariable(el, this.direction)) {
+
                 if( not(isBlackCell)(el) )  {
+
                     this.changeDirection();
                     return;
                 }
             }
 
             // // doubleclicking to change direction
-            // // IFF not synthetic event (eg. clicked from the list of clues) == there exists an endEvent)
             if (this.selected && el.id == this.selected.id && not(isBlackCell)(el) ) {
                 this.changeDirection();
                 return;
             }
 
             this.selected = el;
-            this.rafPending = true;
-
+            this.rafPending = true;            
+            
+            
             const updateCellView = this.updateCellView.bind(this);
             window.requestAnimationFrame(updateCellView);
             // allow next activation
@@ -276,7 +295,7 @@ export class Action {
             const clueNumber = wordNumber + 1;
 
             // make updates
-            // this.updateCluesList(clueNumber, this.direction);
+            this.updateCluesList(clueNumber, this.direction);
 
             this.activeCells.forEach(this.makeCellAriaLabel.bind(this, word, letterIndex, clueNumber));
         }
@@ -321,14 +340,16 @@ export class Action {
                 this.cellIdToVariableDict[`${cell.id}`][this.direction].isStartOfWord);
 
             if (nextWord) {
+                
                 next = nextWord.cell;
+
             } else {
                 // if there are no more words in this direction, then change direction
                 const [changeDirection] = [ACROSS, DOWN].filter(dir => dir !== this.direction);
-                const firstWord = this.startOfWordCells.find(({ cell, startOfWordVariable }) =>
-                    getCellVariable(cell, changeDirection)); // this will return if it belongs to a variable on the change direction
+                // if not nextWord in the current direction, find the word the cell belongs to a variable on the change direction
+                const firstWord = this.startOfWordCells.find(({ cell, startOfWordVariable }) => getCellVariable(cell, changeDirection));
                 next = firstWord.cell;
-                // In case next has both directions, then the direction will not switch to activate
+                // In case next has both directions, then the direction will not switch on activate
                 // in this case, force a change of Direction
                 this.changeDirection(next);
                 return;
@@ -372,6 +393,12 @@ export class Action {
         return ([text, hiddenText, content]);
     }
 
+    updateDirectionAndSelected(cell, direction) {
+        this.direction = direction;
+        // prevent loop in the activation event when checking for change direction, since the selected.id remains the same
+        this.selected = null;
+        cell.dispatchEvent(new Event(createUserActivationAction()), { bubbles: true });
+    }
     // Function overload: 
     // If it is called from touch cluelist, it passed the selected and the touch event, 
     // if it is called from activateWord, it passed the newTarget
@@ -387,83 +414,113 @@ export class Action {
         // if it doesn't exist in another direction, just return,
         // else, change direction
         if (getCellVariable(cell, changeDirection)) {// this will return if the cell exists in a word on the changeDirection
-            this.direction = changeDirection;
-            this.selected = null; // prevent loop
-            cell.dispatchEvent(new Event(createUserActivationAction()), { bubbles: true });
+            this.updateDirectionAndSelected(cell, changeDirection);
         }
 
     }
 
-  
-    // updateCluesList(clueNumber, direction, fromCluesList = false) {
+    // we can update the clueList either by navigating the grid OR by clicking on the clueList
+    updateCluesList(clueNumber, direction, fromCluesList = false) {
 
-    //     const addHighlight = this.addHighlight.bind(this);
+        // if we didn't click on a cell - we clicked on the clue list and might have changed the direction
+         if (fromCluesList) {           
+            const gridCell = this.startOfWordCells[clueNumber - 1].cell;
+            this.updateDirectionAndSelected(gridCell, direction)
+              // the rest of this function will be called from the activation event
+            return;
+         } else { 
+             // after activation event by clicking on the grid 
+             const addHighlight = this.addHighlight.bind(this);
+ 
+             // remove previously selected style in Clues List
+             if (this.selectedClue) {
+                 // no new change but maybe the crossed word has changed
+                 const [previousDir, previousNum] = this.selectedClue.split('-');
+                 if (previousDir == direction && previousNum == clueNumber) {
+                     window.requestAnimationFrame(addHighlight);
+                     return;
+                 }
+                 this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`).classList.remove('activeClue');
+             }
+ 
+            // notify path - synchronous
+            // https://polymer-library.polymer-project.org/2.0/docs/devguide/data-system#data-flow-is-synchronous
+            this.selectedClue = `${this.direction}-${clueNumber}`;
+            this.component.notifyPath('action.selectedClue');
 
-    //     // remove previously selected style in Clues List
-    //     if (this.selectedClue) {
-    //         // no new change but maybe the crossed word has changed
-    //         const [previousDir, previousNum] = this.selectedClue.split('-');
-    //         if (previousDir == direction && previousNum == clueNumber) {
-    //             window.requestAnimationFrame(addHighlight);
-    //             return;
-    //         }
-    //         this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`).classList.remove('activeClue');
-    //     }
+            const cluekey = this.cellIdToVariableDict[this.selected.id][this.direction].variable;
+            this.selectedClueText = this.clues.get(cluekey);
+            const clueText = this.shadowRoot.querySelector('.clueText');
+            clueText.textContent = this.selectedClueText;
+            this.component.notifyPath('action.selectedClueText');
 
-    //     // make the change
-    //     this.direction = direction; //@TODO change the way we do this
-    //     this.selectedClue = `${this.direction}-${clueNumber}`;
-    //     const active = this.shadowRoot.querySelector(`[data-dir='${this.direction}'] [data-li-clue-index ='${clueNumber}']`);
-    //     active.classList.add('activeClue');
+            const active = this.shadowRoot.querySelector(`[data-dir='${this.direction}'] [data-li-clue-index ='${clueNumber}']`);
+            active.classList.add('activeClue');
 
-    //     if (fromCluesList) {
-    //         const gridCell = this.startOfWordCells[clueNumber - 1].cell;
-    //         gridCell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true })); // first send the event to the svg
-    //     } else {
-    //         // if we are not displaying touch
-    //         if (this.shadowRoot.querySelector('.scrolls ol')) {
-    //             //active.scrollIntoView({ block: 'nearest', inline: 'start' });
-    //             active.parentNode.scrollTop = active.offsetTop - active.parentNode.offsetTop;
-    //         } else {
-    //             //mobile                
-    //             // active.scrollIntoView({ block: 'nearest', inline: 'start' });
-    //             active.parentNode.parentNode.style.top = `${-active.offsetTop}px`;
-    //         }
-    //     }
+            // if we are not displaying touch
+            if (this.shadowRoot.querySelector('.scrolls ol')) {
+                //active.scrollIntoView({ block: 'nearest', inline: 'start' });
+                active.parentNode.scrollTop = active.offsetTop - active.parentNode.offsetTop;
+            } else {
+                //mobile                
+                // active.scrollIntoView({ block: 'nearest', inline: 'start' });
+                active.parentNode.parentNode.style.top = `${-active.offsetTop}px`;
+            }
 
-    //     window.requestAnimationFrame(addHighlight);
-    // }
+            window.requestAnimationFrame(addHighlight);
+         }
+    }
 
     // animationFrame Queues don't run until all queued are completed
     // HightLight the crossed Clue for the one that is selected
 
-    // addHighlight() {
-    //     // IF WE ARE ON MOBILE DONT'T CONTINUE // SOS SOS SOS!!!!!!!!!!!  
-    //     const scrolls = this.shadowRoot.querySelector('.scrolls ol');
-    //     if (!scrolls) {
-    //         //  console.log('touch');
-    //         return;
-    //     }
-    //     if (this.highlightedClue) {
-    //         const [previousDir, previousNum] = this.highlightedClue.split('-');
-    //         this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`).classList.remove('highlightedClue');
-    //     }
-    //     const otherDirection = this.direction == ACROSS ? DOWN : ACROSS;
-    //     const highlightedVariable = getCellVariable(this.selected, otherDirection); //selected.getAttribute(`data-variable-${direction}`).split('-');
-    //     const highlightedClue = this.startOfWordCells.findIndex(({ cell }) => getCellVariable(cell, otherDirection) == highlightedVariable);
-    //     // maybe there isn't a word on the other direction
-    //     if (highlightedClue > -1) {
-    //         const highlightedClueNumber = highlightedClue + 1;
-    //         const highlightedLi = this.shadowRoot.querySelector(`[data-dir='${otherDirection}'] [data-li-clue-index ='${highlightedClueNumber}']`);
+    addHighlight() {
+        // IF WE ARE ON MOBILE DONT'T CONTINUE // SOS SOS SOS!!!!!!!!!!!  
+        const scrolls = this.shadowRoot.querySelector('.scrolls ol');
+        if (!scrolls) {
+            //  console.log('touch');
+            return;
+        }
+        if (this.highlightedClue) {
+            const [previousDir, previousNum] = this.highlightedClue.split('-');
+            this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`).classList.remove('highlightedClue');
+        }
+        const otherDirection = this.direction == ACROSS ? DOWN : ACROSS;
+        const highlightedVariable = getCellVariable(this.selected, otherDirection); //selected.getAttribute(`data-variable-${direction}`).split('-');
+        const highlightedClue = this.startOfWordCells.findIndex(({ cell }) => getCellVariable(cell, otherDirection) == highlightedVariable);
+        // maybe there isn't a word on the other direction
+        if (highlightedClue > -1) {
+            const highlightedClueNumber = highlightedClue + 1;
+            const highlightedLi = this.shadowRoot.querySelector(`[data-dir='${otherDirection}'] [data-li-clue-index ='${highlightedClueNumber}']`);
 
-    //         this.highlightedClue = `${otherDirection}-${highlightedClueNumber}`;
-    //         highlightedLi.classList.add('highlightedClue');
+            this.highlightedClue = `${otherDirection}-${highlightedClueNumber}`;
+            highlightedLi.classList.add('highlightedClue');          
+         
 
-    //         //@TODO SOS MAKE SURE WE ARE NOT DOING THIS ON MOBILE, BECAUSE IT WLL SCROLL TO VIEW THE OTHER DIRECTION!!!!!!!!!!!
-    //         // highlightedLi.scrollIntoView();
-    //         highlightedLi.parentNode.scrollTop = highlightedLi.offsetTop - highlightedLi.parentNode.offsetTop;
-    //     }
-    // }
+            //@TODO SOS MAKE SURE WE ARE NOT DOING THIS ON MOBILE, BECAUSE IT WLL SCROLL TO VIEW THE OTHER DIRECTION!!!!!!!!!!!
+            // highlightedLi.scrollIntoView();
+            highlightedLi.parentNode.scrollTop = highlightedLi.offsetTop - highlightedLi.parentNode.offsetTop;
+        }
+       
+    }
+
+    // assumes attribute is Array with elements of type Map
+    updateValuesFromComponent(attributes, updatedValues) {
+        const valueArrays = updatedValues.map((value) => Array.from(value.keys()));       
+        for (let v of this.crossword.variables) {
+            valueArrays.forEach((keysArray, indx) => {
+                const clueKey = keysArray.find((f) =>f.equals(v));
+                if(clueKey) {
+                    this[attributes[indx]].set(v, updatedValues[indx].get(clueKey));
+                }
+            });
+         }
+         return attributes.reduce( (acc,cur) => {
+                acc[cur] = this[cur];
+                return acc; 
+                }, 
+            {} ) ;
+    }
 
 }
 // The Task queue is on the opposite side of the Render steps Ιnside a Frame
