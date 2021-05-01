@@ -440,7 +440,7 @@ class MyView2 extends PolymerElement {
     this.gridFile = 7;
     this.constraints;
     // only contain for the updates not the entire lists
-    this.solution = new Map();
+    // this.solution = new Map();
     this.clues = new Map();
   }
  
@@ -504,6 +504,7 @@ class MyView2 extends PolymerElement {
     this.createView();    
   }
 
+  // creates
   createView() { 
     // is this only imported once?
     return Promise.all([import('./component.js'), import('./helper.js')])
@@ -544,7 +545,7 @@ class MyView2 extends PolymerElement {
     .then(({dependencies, actionInstance}) => {
       // console.log(dependencies, actionInstance)
       this.actionInstance = actionInstance;
-      this.dependencies = dependencies;
+      this.dependencies = dependencies;     
 
       // if we fetched the grid and haven't saved it yet
       // create a copy
@@ -553,10 +554,14 @@ class MyView2 extends PolymerElement {
       this.action = actionInstance;
 
       this.manageClicks();
+
+      return actionInstance;
+      
     });   
 
   }
 
+  // create new action since we changed the variables
   toggleConstraint(evt) {
     const selected = this.actionInstance.selected;
     const cellId = this.helper.getCellNumber(selected);
@@ -573,7 +578,37 @@ class MyView2 extends PolymerElement {
       this.constraints = [];
       this.constraints.push(cellId + 1);
     }
-    this.createView();
+    // make the change
+    this.createView().then((actionInstance) => {
+
+       // check that the previous variables still exist after we change the constraints
+       const vars = Array.from(actionInstance.crossword.variables)
+       const clueKeysArray = Array.from(this.clues.keys());
+       // const solutionKeysArray = Array.from(this.solution.keys());
+
+       for(let k of clueKeysArray) {
+          // if only the length has changed
+         const c = vars.find(v => ( (v.i == k.i) &&(v.j == k.j) &&(v.direction == k.direction))  );
+         // replace
+         if(c) {
+           this.clues.set(c, this.clues.get(k))
+         }
+         // delete the previous variable
+         this.clues.delete(k)
+       }
+
+      //  for(let l of solutionKeysArray) {
+      //    // if only the length has changed
+      //    const c = vars.find(v => ( (v.i == k.i) &&(v.j == k.j) &&(v.direction == k.direction))  );
+      //    if(c) {
+      //      // replace
+      //      this.solution.set(c, this.clues.get(l))
+      //    }
+      //    this.clues.delete(l);
+      //  }
+
+       return this.updateView();
+    });
   }
 
   toggleDependencies(remove){
@@ -606,14 +641,14 @@ class MyView2 extends PolymerElement {
   }
 
 
+  // updates
+
   updateView() {
-    const keepCell = true;
     return Promise.all([import('./component.js'), import('./helper.js')])
     .then(([view, helper]) => {
       this.helper = helper;
       const component = this;
-      const dim = this.actionInstance.crossword.width;
-      return view.init(component, [dim,dim], this.actionInstance.crossword, keepCell);
+      return view.update(component);
     });
   }
   
@@ -637,7 +672,7 @@ class MyView2 extends PolymerElement {
   }
 
   _activeChanged(action) {
-    console.log('active changed');    
+    console.log('aaaa', 'active changed');    
   }
 
 

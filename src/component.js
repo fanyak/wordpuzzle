@@ -2,12 +2,11 @@ import { Crossword, Variable } from './cross.js';
 import { not, createUserActivationAction, removeAllChildNodes, createSymmetricConstraints, removeSymmetricConstraints } from './helper.js';
 import { Action } from './action.js';
 
-export function init(component, crosswordDimentions, crossword, keepCell) {
+export function init(component, crosswordDimentions, crossword) {
 
     // const crosswordDimentions = [15, 15];
-
     let { shadowRoot, gridFile, constraints } = component;    
-   
+
     // @TODO change to CDN?
     const rootUrl = 'http://localhost:3000/';
 
@@ -18,7 +17,7 @@ export function init(component, crosswordDimentions, crossword, keepCell) {
         'Content-Type': 'application/json'
         }
     }   
-    
+
     // @TODO how dow we choose size?
     const gridSpan = 495;
     const cellSize = gridSpan / crosswordDimentions[0];
@@ -44,87 +43,80 @@ export function init(component, crosswordDimentions, crossword, keepCell) {
     const board = shadowRoot.querySelector('.board');
 
     const dependencies = {listeners: []} // {target: fn}    
-   
+
     // if we are updating
-    if(keepCell) {
-        const actionInstance = component.actionInstance;
-        return  Promise.resolve(actionInstance.updateValuesFromComponent(['solution', 'clues'], [component.solution, component.clues]))
-        .then(({solution, clues}) => buildCluesFromInstance([{solution}, {clues}]))
-        .then((clues)=> updateDesktopClues(clues, actionInstance))
-        .then(() => initializeView(actionInstance));        
-    } else { // we are creating
-        const reqHeaders = [];
-        // @TODO this is an input from the element
-        const gridFiles = gridFile ? [`api/grids/${gridFile}`] : ['api/grids/empty'];
-        const gridReqOptions = { method: 'GET', ...headers}; // gridFile ? { method: 'GET', ...headers} : {method: 'POST', ...headers} ;
-        reqHeaders.push(gridReqOptions);
+    // we are creating
+    const reqHeaders = [];
+    // @TODO this is an input from the element
+    const gridFiles = gridFile ? [`api/grids/${gridFile}`] : ['api/grids/empty'];
+    const gridReqOptions = { method: 'GET', ...headers}; // gridFile ? { method: 'GET', ...headers} : {method: 'POST', ...headers} ;
+    reqHeaders.push(gridReqOptions);
 
-        // if we haven't already fetched the words
-        if(!crossword) {
-        gridFiles.push('api/words');
-        reqHeaders.push({ method: 'GET', ...headers});
-        }
+    // if we haven't already fetched the words
+    if(!crossword) {
+    gridFiles.push('api/words');
+    reqHeaders.push({ method: 'GET', ...headers});
+    }
 
-        const fetchFiles = gridFiles.map((req) => `${rootUrl}${req}`);
-        const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
-        //@TODO we don't need the vocab file for displaying a generated crossword
-        let promise;
-        // first check that we haven't saved the constraints or haven't added any constraints
-        if(!crossword && !constraints) { 
-            // fetch both words and grid (either given grid or empty)
-            promise = Promise.all(fetchFiles.map((file,indx) => fetch(file, reqHeaders[indx])))
-            .then(responses => Promise.all(responses.map(response => response.json())));
+    const fetchFiles = gridFiles.map((req) => `${rootUrl}${req}`);
+    const solutionFiles = ['api/solutions/7', 'api/clues/7'].map((req) => `${rootUrl}${req}`);
+    //@TODO we don't need the vocab file for displaying a generated crossword
+    let promise;
+    // first check that we haven't saved the constraints or haven't added any constraints
+    if(!crossword && !constraints) { 
+        // fetch both words and grid (either given grid or empty)
+        promise = Promise.all(fetchFiles.map((file,indx) => fetch(file, reqHeaders[indx])))
+        .then(responses => Promise.all(responses.map(response => response.json())));
 
-            // @TODO we must store the id of the grid if we created one!!!!  DON'T CREATE ONE UNITL WE SAVE
+        // @TODO we must store the id of the grid if we created one!!!!  DON'T CREATE ONE UNITL WE SAVE
 
-        } else if (!crossword && constraints) { 
-            // we have the constraints
-            constraints = manageConstraints([...constraints]); 
-            // fetch only the words       
-            promise = fetch(fetchFiles[1], reqHeaders[1])
-            .then(response => response.json())
-            .then((words) => [{constraints}, words]);
+    } else if (!crossword && constraints) { 
+        // we have the constraints
+        constraints = manageConstraints([...constraints]); 
+        // fetch only the words       
+        promise = fetch(fetchFiles[1], reqHeaders[1])
+        .then(response => response.json())
+        .then((words) => [{constraints}, words]);
 
-        } else if (!constraints) { // we have the words, fetch the grid (either given or empty)
-            promise = fetch(fetchFiles[0], reqHeaders[0])
-            .then(response => response.json())
-            .then((structure) => [structure, {vocab:crossword.words}]);
+    } else if (!constraints) { // we have the words, fetch the grid (either given or empty)
+        promise = fetch(fetchFiles[0], reqHeaders[0])
+        .then(response => response.json())
+        .then((structure) => [structure, {vocab:crossword.words}]);
 
-            // @TODO we must store the id of the grid if we created one - DON'T CREATE ONE UNITL WE SAVE !!!!
+        // @TODO we must store the id of the grid if we created one - DON'T CREATE ONE UNITL WE SAVE !!!!
 
-        } else { // we have the constraints and the crossword => resolve promise
-            constraints = manageConstraints([...constraints]);
-            promise = Promise.resolve([{constraints}, {vocab:crossword.words}]);
-        }
+    } else { // we have the constraints and the crossword => resolve promise
+        constraints = manageConstraints([...constraints]);
+        promise = Promise.resolve([{constraints}, {vocab:crossword.words}]);
+    }
 
-        return promise
-            .then(([structure, words]) => new Crossword(structure, words, ...crosswordDimentions))
-            .then((crossword) => makeCells(crossword))
-            .then((crossword) => makeGrid(crossword))
-            .then((crossword) => addActions(crossword))
-            // .then((actionInstance) => displayKeyboard(actionInstance))
-            .catch((err) => {
-                console.log(err); // @ TODO handle the error
-            })
-            // .then((actionInstance) =>
-            //     Promise.all(solutionFiles.map(file => fetch(file, { method: 'GET', ...headers})))
-            //         // // // create clusure for actionInstance
-            //         // .then(responses => Promise.all(responses.map(response => response.json())))
-            //         // .then(data => getClues(data))
-            //         // .then(clues => displayClues(clues, actionInstance))
-            //         // .then((actionInstance) => initializeView(actionInstance))
-            //         // .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
-            //  )
-            .then((actionInstance) => 
-                Promise.resolve(getClues([{solution: actionInstance.solution}, {clues: actionInstance.clues}]))
-                            .then((clues)=> displayClues(clues, actionInstance))
-                            .then((actionInstance) => initializeView(actionInstance))
-                            .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
-            )
-            .catch((err) => {
-                console.log(err);
-            });
-    } // if not keepCell
+    return promise
+        .then(([structure, words]) => new Crossword(structure, words, ...crosswordDimentions))
+        .then((crossword) => makeCells(crossword))
+        .then((crossword) => makeGrid(crossword))
+        .then((crossword) => addActions(crossword))
+        // .then((actionInstance) => displayKeyboard(actionInstance))
+        .catch((err) => {
+            console.log(err); // @ TODO handle the error
+        })
+        // .then((actionInstance) =>
+        //     Promise.all(solutionFiles.map(file => fetch(file, { method: 'GET', ...headers})))
+        //         // // // create clusure for actionInstance
+        //         // .then(responses => Promise.all(responses.map(response => response.json())))
+        //         // .then(data => getClues(data))
+        //         // .then(clues => displayClues(clues, actionInstance))
+        //         // .then((actionInstance) => initializeView(actionInstance))
+        //         // .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
+        //  )
+        .then((actionInstance) => 
+            Promise.resolve(getClues([{solution: actionInstance.solution}, {clues: actionInstance.clues}]))
+                        .then((clues)=> displayClues(clues, actionInstance))
+                        .then((actionInstance) => initializeView(actionInstance))
+                        .then((actionInstance) => ({dependencies, actionInstance}))// final return to view
+        )
+        .catch((err) => {
+            console.log(err);
+        });
 
 
     function manageConstraints(constraints) {
@@ -438,13 +430,31 @@ export function init(component, crosswordDimentions, crossword, keepCell) {
         sectionDiv.removeAttribute('hidden');
         section.removeAttribute('hidden');
     }
+   
 
+    function initializeView(actionInstance) { 
+        // set initial active cell
+        if (!actionInstance.selected) {
+            const firstWord = startOfWordCells.length ? startOfWordCells[0] : {cell: shadowRoot.querySelector('#cell-id-0')};
+            firstWord.cell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true }));
+        }
+        return actionInstance;
+    }
+}
 
-    function buildCluesFromInstance([{ solution }, { clues }]) {
+export function update(component) {
+
+    const { shadowRoot, actionInstance } = component;
+    
+    return  Promise.resolve(actionInstance.updateValuesFromComponent(['clues'], [component.clues]))
+    .then(({clues}) => buildCluesFromInstance({clues}))
+    .then((clues)=> updateDesktopClues(clues))
+
+    function buildCluesFromInstance({ clues }) {
         const { startOfWordCells } = component.actionInstance;
         const clueKeys = Array.from(clues.keys());
         const allClues = { 'across': {}, 'down': {} };
-        for (let [keyVariable, value]  of solution) {  
+        for (let [keyVariable, value]  of actionInstance.solution) {  
             const wordIndex = startOfWordCells.findIndex(({ startOfWordVariable }) =>
                 startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j);                
             const clue =  clueKeys.find((f) => f.equals(keyVariable));
@@ -464,16 +474,6 @@ export function init(component, crosswordDimentions, crossword, keepCell) {
                 clueCell.appendChild(clueText);
             }
         }
-    }
-   
-
-    function initializeView(actionInstance) { 
-        // set initial active cell
-        if (!actionInstance.selected) {
-            const firstWord = startOfWordCells.length ? startOfWordCells[0] : {cell: shadowRoot.querySelector('#cell-id-0')};
-            firstWord.cell.dispatchEvent(new Event(createUserActivationAction(), { bubbles: true }));
-        }
-        return actionInstance;
-    }
+    }   
 
 }

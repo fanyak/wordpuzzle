@@ -6,6 +6,8 @@ import {
 
 const { ACROSS, DOWN, isSameCell } = Variable;
 
+
+
 export class Action {
 
     constructor(component, crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot, solution, clues) {
@@ -33,12 +35,14 @@ export class Action {
         this.solution = new Map();
         this.clues = new Map();
 
+        // add the existing values for the component
         const solutionKeysArray = Array.from(this.component.clues.keys())
         const clueKeysArray = Array.from(this.component.clues.keys())
 
         for (let v of crossword.variables) {
 
-            const solutionKey =solutionKeysArray.find((f) =>f.equals(v));
+            // check that there still exists the variable after the new view is created (might have changed the constraints)
+            const solutionKey =solutionKeysArray.find((f) => new Variable(f).equals(v));
             const clueKey = clueKeysArray.find((f) =>f.equals(v));
 
             // const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
@@ -53,6 +57,23 @@ export class Action {
                 this.clues.set(v, "");
             }
         }
+
+        // worker
+        this.myWorker = new SharedWorker('./src/worker.js');
+        this.myWorker.port.onmessage = (e) => {
+            try {
+                const s = new Map(JSON.parse(e.data))    
+                this.solution = s;
+                this.component.notifyPath('action.solution');
+                console.log(this.solution);
+
+            } catch(err) {
+                console.log(err);
+            }
+            console.log('Message received from worker');
+        }
+
+
     }
 
 
@@ -78,7 +99,15 @@ export class Action {
             const content = document.createTextNode(letter);
             text.appendChild(content);
             hiddenText.textContent = letter;
-            this.cellIdToVariableDict[`cell-id-${cellNumber}`][this.direction].letter = letter;
+
+            // this.cellIdToVariableDict[`cell-id-${cellNumber}`][this.direction].letter = letter;
+            // Add for both directions!
+            if(this.cellIdToVariableDict[`cell-id-${cellNumber}`][DOWN]){
+                this.cellIdToVariableDict[`cell-id-${cellNumber}`][DOWN].letter = letter;
+            }
+            if(this.cellIdToVariableDict[`cell-id-${cellNumber}`][ACROSS]){
+                this.cellIdToVariableDict[`cell-id-${cellNumber}`][ACROSS].letter = letter;
+            }
 
             // activate the next empty cell
             if (this.direction == ACROSS) {
@@ -471,7 +500,7 @@ export class Action {
          }
     }
 
-    // animationFrame Queues don't run until all queued are completed
+    // animationFrame Queues don't run until the queu is exhausted
     // HightLight the crossed Clue for the one that is selected
 
     addHighlight() {
@@ -501,10 +530,23 @@ export class Action {
             // highlightedLi.scrollIntoView();
             highlightedLi.parentNode.scrollTop = highlightedLi.offsetTop - highlightedLi.parentNode.offsetTop;
         }
-       
+        
+        // add this at the end of all the updates
+        this.updateLetterInWorker()
     }
 
+
+    updateLetterInWorker() {
+        this.myWorker.port.postMessage([ 
+                JSON.stringify(Array.from(this.solution)), 
+                JSON.stringify(Array.from(this.crossword.variables)), 
+                JSON.stringify(this.cellIdToVariableDict)  
+        ]); 
+    }
+
+
     // assumes attribute is Array with elements of type Map
+    // @TODO return which values where updated!!! so we can only change those nodes in component.update
     updateValuesFromComponent(attributes, updatedValues) {
         const valueArrays = updatedValues.map((value) => Array.from(value.keys()));       
         for (let v of this.crossword.variables) {
