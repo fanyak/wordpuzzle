@@ -10,7 +10,7 @@ const { ACROSS, DOWN, isSameCell } = Variable;
 
 export class Action {
 
-    constructor(component, crossword, direction, startOfWordCells, cellIdToVariableDict, shadowRoot, solution, clues) {
+    constructor(component, crossword, direction, startOfWordCells, cellIdToVariableDict ) {
 
         this.component = component.bind(component())();
 
@@ -36,18 +36,20 @@ export class Action {
         this.clues = new Map();
 
         // add the existing values for the component
-        const solutionKeysArray = Array.from(this.component.clues.keys())
+        const solutionKeysArray = Array.from(this.component.solution.keys())
         const clueKeysArray = Array.from(this.component.clues.keys())
 
         for (let v of crossword.variables) {
 
-            // check that there still exists the variable after the new view is created (might have changed the constraints)
-            const solutionKey =solutionKeysArray.find((f) => new Variable(f).equals(v));
-            const clueKey = clueKeysArray.find((f) =>f.equals(v));
+            // Check that there still exists the variable after the new view is created (might have changed the constraints)
+
+            // after JSON.parse it is an object not a class Variable
+            const solutionKey =solutionKeysArray.find((f) => f instanceof Variable ? f.equals(v) : new Variable(f).equals(v));
+            const clueKey = clueKeysArray.find((f) => f.equals(v));
 
             // const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
             if(solutionKey) {
-                this.solution.set(v, this.component.solution.get(v));
+                this.solution.set(v, this.component.solution.get(solutionKey));
             } else {
                 this.solution.set(v, [...v.cells]);
             }
@@ -62,11 +64,10 @@ export class Action {
         this.myWorker = new SharedWorker('./src/worker.js');
         this.myWorker.port.onmessage = (e) => {
             try {
-                const s = new Map(JSON.parse(e.data))    
-                this.solution = s;
-                this.component.notifyPath('action.solution');
+                this.solution = new Map(JSON.parse(e.data));
                 console.log(this.solution);
-
+                //clone the solution so we can save it
+                this.component.solution = new Map(this.solution); 
             } catch(err) {
                 console.log(err);
             }
@@ -102,12 +103,9 @@ export class Action {
 
             // this.cellIdToVariableDict[`cell-id-${cellNumber}`][this.direction].letter = letter;
             // Add for both directions!
-            if(this.cellIdToVariableDict[`cell-id-${cellNumber}`][DOWN]){
-                this.cellIdToVariableDict[`cell-id-${cellNumber}`][DOWN].letter = letter;
-            }
-            if(this.cellIdToVariableDict[`cell-id-${cellNumber}`][ACROSS]){
-                this.cellIdToVariableDict[`cell-id-${cellNumber}`][ACROSS].letter = letter;
-            }
+            for(let dir in this.cellIdToVariableDict[`cell-id-${cellNumber}`]){
+                this.cellIdToVariableDict[`cell-id-${cellNumber}`][dir].letter = letter;
+            }           
 
             // activate the next empty cell
             if (this.direction == ACROSS) {
@@ -116,6 +114,8 @@ export class Action {
                this.activateWord(cellNumber, 15);
             }
 
+            // add this at the end of all the updates
+            this.updateLetterInWorker();
             return;
         }
 
@@ -135,8 +135,10 @@ export class Action {
                     const nextCellId = next.id;
                     this.removeExistingContent(nextCellId);
                 }
-            }
+            } 
 
+            // add this at the end of all the updates
+            this.updateLetterInWorker();          
             return;
         }
 
@@ -416,9 +418,11 @@ export class Action {
         const content = [...text.childNodes].find(not(isHiddenNode));
         if (content) {
             text.removeChild(content);
-            this.cellIdToVariableDict[`${cellId}`][DOWN].letter = null;
-            this.cellIdToVariableDict[`${cellId}`][ACROSS].letter = null;
+            for(let dir in this.cellIdToVariableDict[`${cellId}`]){
+                this.cellIdToVariableDict[`${cellId}`][dir].letter = null;
+            }           
         }
+       
         return ([text, hiddenText, content]);
     }
 
@@ -512,7 +516,10 @@ export class Action {
         }
         if (this.highlightedClue) {
             const [previousDir, previousNum] = this.highlightedClue.split('-');
-            this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`).classList.remove('highlightedClue');
+            const p = this.shadowRoot.querySelector(`[data-dir='${previousDir}'] [data-li-clue-index ='${previousNum}']`);
+            if(p){ // check if we haven't removed the square in an update
+                p.classList.remove('highlightedClue');
+            }
         }
         const otherDirection = this.direction == ACROSS ? DOWN : ACROSS;
         const highlightedVariable = getCellVariable(this.selected, otherDirection); //selected.getAttribute(`data-variable-${direction}`).split('-');
@@ -523,20 +530,19 @@ export class Action {
             const highlightedLi = this.shadowRoot.querySelector(`[data-dir='${otherDirection}'] [data-li-clue-index ='${highlightedClueNumber}']`);
 
             this.highlightedClue = `${otherDirection}-${highlightedClueNumber}`;
-            highlightedLi.classList.add('highlightedClue');          
-         
 
-            //@TODO SOS MAKE SURE WE ARE NOT DOING THIS ON MOBILE, BECAUSE IT WLL SCROLL TO VIEW THE OTHER DIRECTION!!!!!!!!!!!
-            // highlightedLi.scrollIntoView();
-            highlightedLi.parentNode.scrollTop = highlightedLi.offsetTop - highlightedLi.parentNode.offsetTop;
+            if(highlightedLi) { // check if we haven't removed in an update
+                highlightedLi.classList.add('highlightedClue');
+                //@TODO SOS MAKE SURE WE ARE NOT DOING THIS ON MOBILE, BECAUSE IT WLL SCROLL TO VIEW THE OTHER DIRECTION!!!!!!!!!!!
+                // highlightedLi.scrollIntoView();
+                highlightedLi.parentNode.scrollTop = highlightedLi.offsetTop - highlightedLi.parentNode.offsetTop;
+            }
         }
-        
-        // add this at the end of all the updates
-        this.updateLetterInWorker()
     }
 
 
     updateLetterInWorker() {
+        console.log(this.cellIdToVariableDict)
         this.myWorker.port.postMessage([ 
                 JSON.stringify(Array.from(this.solution)), 
                 JSON.stringify(Array.from(this.crossword.variables)), 
@@ -551,7 +557,7 @@ export class Action {
         const valueArrays = updatedValues.map((value) => Array.from(value.keys()));       
         for (let v of this.crossword.variables) {
             valueArrays.forEach((keysArray, indx) => {
-                const clueKey = keysArray.find((f) =>f.equals(v));
+                const clueKey = keysArray.find((f) => f instanceof Variable ? f.equals(v) : new Variable(f).equals(v));
                 if(clueKey) {
                     this[attributes[indx]].set(v, updatedValues[indx].get(clueKey));
                 }
@@ -562,6 +568,27 @@ export class Action {
                 return acc; 
                 }, 
             {} ) ;
+    }
+
+     // function bound to actionInstance
+     updateCellLetters(cells) {
+        for (let {cellId, letter} of cells) {
+            //@ TODO make a functon of this from Action
+            const [text, hiddenText] = this.removeExistingContent(cellId);
+            // replace or add content in the cell
+            const content = document.createTextNode(letter);
+            text.appendChild(content);
+            hiddenText.textContent = letter;
+        }
+        return this.updateCellDictionary(cells);
+    } 
+
+    updateCellDictionary(cells) {
+        for (let {cellId, letter} of cells) {
+            for(let dir in this.cellIdToVariableDict[cellId] ){
+                this.cellIdToVariableDict[cellId][dir].letter = letter;
+            }
+        }      
     }
 
 }

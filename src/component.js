@@ -1,5 +1,5 @@
 import { Crossword, Variable } from './cross.js';
-import { not, createUserActivationAction, removeAllChildNodes, createSymmetricConstraints, removeSymmetricConstraints } from './helper.js';
+import { isLetterEnglish, createUserActivationAction, removeAllChildNodes, createSymmetricConstraints, removeSymmetricConstraints, getCellNumber} from './helper.js';
 import { Action } from './action.js';
 
 export function init(component, crosswordDimentions, crossword) {
@@ -446,21 +446,37 @@ export function update(component) {
 
     const { shadowRoot, actionInstance } = component;
     
-    return  Promise.resolve(actionInstance.updateValuesFromComponent(['clues'], [component.clues]))
-    .then(({clues}) => buildCluesFromInstance({clues}))
-    .then((clues)=> updateDesktopClues(clues))
+    return  Promise.resolve(actionInstance.updateValuesFromComponent(['clues', 'solution'], [component.clues, component.solution]))
+    .then(({clues, solution}) => buildValuesFromInstance({clues, solution}))
+    //.then((clues)=> updateDesktopClues(clues))
 
-    function buildCluesFromInstance({ clues }) {
+    function buildValuesFromInstance({ clues, solution }) {
         const { startOfWordCells } = component.actionInstance;
         const clueKeys = Array.from(clues.keys());
         const allClues = { 'across': {}, 'down': {} };
-        for (let [keyVariable, value]  of actionInstance.solution) {  
+        const cellsWithLetters = [];
+
+        // get existing clues 
+        for (let [keyVariable, value]  of solution) {  
             const wordIndex = startOfWordCells.findIndex(({ startOfWordVariable }) =>
-                startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j);                
+                startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j); 
+            const cell =  startOfWordCells[wordIndex].cell;             
             const clue =  clueKeys.find((f) => f.equals(keyVariable));
-            allClues[keyVariable.direction][wordIndex + 1] = clues.get(clue);
-        };
-        return allClues;
+            allClues[keyVariable.direction][wordIndex + 1] = clues.get(clue); 
+
+            // get existing solution
+            for(let i = 0; i <= value.length; i++){
+               if(isLetterEnglish(value[i])){
+                const diff = keyVariable.direction == Variable.ACROSS ? (i * 1) : (i * actionInstance.crossword.width);
+                const nextId = getCellNumber(cell) + diff;
+                cellsWithLetters.push({cellId:`cell-id-${nextId}`, letter: value[i]});
+               }
+            }            
+        } 
+        const updateCellLetters = actionInstance.updateCellLetters.bind(actionInstance, cellsWithLetters)
+        window.requestAnimationFrame(updateCellLetters);
+        window.requestAnimationFrame(updateDesktopClues.bind(null, allClues));
+        // return allClues;
     }
 
     // @TODO only update the nodes that were changes, not all the list
@@ -468,12 +484,14 @@ export function update(component) {
         for (let direction in clues) {
             for (let clueNumber in clues[direction]) {
                 const clueCell = shadowRoot.querySelector(`[data-dir="${direction}"] [data-li-clue-index="${clueNumber}"] span:nth-child(2)`);
-                const obj = clues[direction][clueNumber];
+                const obj = clues[direction][clueNumber];                
                 removeAllChildNodes(clueCell);                
                 const clueText = document.createTextNode(`${obj}`);                
                 clueCell.appendChild(clueText);
             }
         }
     }   
+
+   
 
 }

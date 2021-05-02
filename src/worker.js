@@ -3,10 +3,9 @@ onconnect = function(e) {
     const port = e.ports[0];  
     let solution = '';
     // port.postMessage('port')
- 
-    port.onmessage = function(e) {        
+    port.onmessage = function(m) {        
         try {
-            solution = createSolution(e.data);
+            solution = createSolution(m.data);
             port.postMessage(solution); 
         } catch(er) {
             port.postMessage(er);  
@@ -32,12 +31,18 @@ function createSolution([s,v,d]) {
                 const indx = solution.findIndex(([f, value]) => variable.i == f.i && variable.j == f.j && variable.direction == f.direction 
                 && variable.length == l.length);
                 const letter = dict[cell][direction].letter;
-                if(letter){
-                    const cellIndex = dict[cell][direction].cellNumber;
-                    console.log(cellIndex)
-                    const [key, value] = solution[indx];
+                const cellIndex = dict[cell][direction].cellNumber;
+                const [key, value] = solution[indx];
+                if(letter){ // if we have added a letter
                     value[cellIndex] = letter;
                     solution[indx] = [variable, value];
+                } else {
+                    // we have Erased the existing letter of the solution
+                    // if it is a string and not the original array
+                    if (value[cellIndex] && value[cellIndex][0] != key.cells[cellIndex][0]) {
+                        value[cellIndex] = ""; // erase the value from the solution, since it doesn't exist any more
+                        solution[indx] = [variable, value];
+                    }                        
                 }
             }
         }

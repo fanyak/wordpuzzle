@@ -440,7 +440,7 @@ class MyView2 extends PolymerElement {
     this.gridFile = 7;
     this.constraints;
     // only contain for the updates not the entire lists
-    // this.solution = new Map();
+    this.solution = new Map();
     this.clues = new Map();
   }
  
@@ -581,10 +581,10 @@ class MyView2 extends PolymerElement {
     // make the change
     this.createView().then((actionInstance) => {
 
-       // check that the previous variables still exist after we change the constraints
+       // We must check that the previous variables still exist after we change the constraints
        const vars = Array.from(actionInstance.crossword.variables)
        const clueKeysArray = Array.from(this.clues.keys());
-       // const solutionKeysArray = Array.from(this.solution.keys());
+       const solutionKeysArray = Array.from(this.solution.keys());
 
        for(let k of clueKeysArray) {
           // if only the length has changed
@@ -597,15 +597,17 @@ class MyView2 extends PolymerElement {
          this.clues.delete(k)
        }
 
-      //  for(let l of solutionKeysArray) {
-      //    // if only the length has changed
-      //    const c = vars.find(v => ( (v.i == k.i) &&(v.j == k.j) &&(v.direction == k.direction))  );
-      //    if(c) {
-      //      // replace
-      //      this.solution.set(c, this.clues.get(l))
-      //    }
-      //    this.clues.delete(l);
-      //  }
+       for(let l of solutionKeysArray) {
+         // if only the length has changed
+         const c = vars.find(v => ( (v.i == l.i) &&(v.j == l.j) &&(v.direction == l.direction))  );
+         if(c) {
+           // replace
+           this.solution.set(c, this.solution.get(l))
+         }
+         this.solution.delete(l);
+       }
+
+       console.log(this.solution)
 
        return this.updateView();
     });
