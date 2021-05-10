@@ -1,18 +1,16 @@
 
-onconnect = function(e) {
-    const port = e.ports[0];  
-    let solution = '';
-    // port.postMessage('port')
-    port.onmessage = function(m) {        
-        try {
-            solution = createSolution(m.data);
-            port.postMessage(solution); 
-        } catch(er) {
-            port.postMessage(er);  
-        }   
-    }
 
-  }
+onmessage = function(m) { 
+    let solution = '';
+    try {
+        solution = createSolution(m.data);
+        postMessage(solution); 
+    } catch(er) {
+        postMessage(er);  
+    }   
+}
+
+  
 
 
 function createSolution([s,v,d]) {
@@ -40,7 +38,7 @@ function createSolution([s,v,d]) {
                     // we have Erased the existing letter of the solution
                     // if it is a string and not the original array
                     if (value[cellIndex] && value[cellIndex][0] != key.cells[cellIndex][0]) {
-                        value[cellIndex] = ""; // erase the value from the solution, since it doesn't exist any more
+                        value[cellIndex] = ""; // erase the existing value from the solution, since it doesn't exist any more
                         solution[indx] = [variable, value];
                     }                        
                 }

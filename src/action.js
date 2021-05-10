@@ -39,17 +39,19 @@ export class Action {
         const solutionKeysArray = Array.from(this.component.solution.keys())
         const clueKeysArray = Array.from(this.component.clues.keys())
 
+        // Build the Solution and Clues Initial Values of the New Action in the constructor
         for (let v of crossword.variables) {
 
             // Check that there still exists the variable after the new view is created (might have changed the constraints)
 
             // after JSON.parse it is an object not a class Variable
-            const solutionKey =solutionKeysArray.find((f) => f instanceof Variable ? f.equals(v) : new Variable(f).equals(v));
-            const clueKey = clueKeysArray.find((f) => f.equals(v));
+            // @TODO  && f.length == v.length ??????????????
+            const solutionKey =solutionKeysArray.find((f) => (f.i == v.i && f.j == v.j && f.direction == v.direction));
+            const clueKey = clueKeysArray.find((f) => (f.i == v.i && f.j == v.j && f.direction == v.direction));
 
             // const key = {i:v.i, j:v.j, direction:v.direction, length: v.length, cells:v.cells};
             if(solutionKey) {
-                this.solution.set(v, this.component.solution.get(solutionKey));
+                this.solution.set(v, (this.component.solution.get(solutionKey)).slice(0,v.length) ); // if we have changed the length only!!
             } else {
                 this.solution.set(v, [...v.cells]);
             }
@@ -61,10 +63,10 @@ export class Action {
         }
 
         // worker
-        this.myWorker = new SharedWorker('./src/worker.js');
-        this.myWorker.port.onmessage = (e) => {
+        this.myWorker = new Worker('./src/worker.js');
+        this.myWorker.onmessage = (e) => {
             try {
-                this.solution = new Map(JSON.parse(e.data));
+                this.solution = new Map(JSON.parse(e.data));// now we have lost the reference to the variables
                 console.log(this.solution);
                 //clone the solution so we can save it
                 this.component.solution = new Map(this.solution); 
@@ -540,10 +542,12 @@ export class Action {
         }
     }
 
-
+    // run a script operation in a background thread separate from the main execution thread of a web application. 
+    // The advantage of this is that laborious processing can be performed in a separate thread, 
+    // allowing the main (usually the UI) thread to run without being blocked/slowed down.
     updateLetterInWorker() {
-        console.log(this.cellIdToVariableDict)
-        this.myWorker.port.postMessage([ 
+        // console.log(this.cellIdToVariableDict)
+        this.myWorker.postMessage([ 
                 JSON.stringify(Array.from(this.solution)), 
                 JSON.stringify(Array.from(this.crossword.variables)), 
                 JSON.stringify(this.cellIdToVariableDict)  
@@ -553,13 +557,13 @@ export class Action {
 
     // assumes attribute is Array with elements of type Map
     // @TODO return which values where updated!!! so we can only change those nodes in component.update
-    updateValuesFromComponent(attributes, updatedValues) {
+    updateValues(attributes, updatedValues) {
         const valueArrays = updatedValues.map((value) => Array.from(value.keys()));       
         for (let v of this.crossword.variables) {
-            valueArrays.forEach((keysArray, indx) => {
-                const clueKey = keysArray.find((f) => f instanceof Variable ? f.equals(v) : new Variable(f).equals(v));
-                if(clueKey) {
-                    this[attributes[indx]].set(v, updatedValues[indx].get(clueKey));
+            valueArrays.forEach((keysArray, indx) => {//@TODO what if we have changed the length?
+                const key = keysArray.find((f) => (f.i == v.i && f.j == v.j && f.direction == v.direction));
+                if(key) {
+                    this[attributes[indx]].set(v, updatedValues[indx].get(key) );
                 }
             });
          }
@@ -574,11 +578,15 @@ export class Action {
      updateCellLetters(cells) {
         for (let {cellId, letter} of cells) {
             //@ TODO make a functon of this from Action
+            const el = this.shadowRoot.querySelector(`#${cellId}`);
             const [text, hiddenText] = this.removeExistingContent(cellId);
-            // replace or add content in the cell
-            const content = document.createTextNode(letter);
-            text.appendChild(content);
-            hiddenText.textContent = letter;
+            // if el still exists after updates
+            if(el && not(isBlackCell)(el)) {
+                // replace or add content in the cell
+                const content = document.createTextNode(letter);
+                text.appendChild(content);
+                hiddenText.textContent = letter;
+            }
         }
         return this.updateCellDictionary(cells);
     } 

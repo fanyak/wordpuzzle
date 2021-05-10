@@ -343,7 +343,7 @@ export function init(component, crosswordDimentions, crossword) {
         for (let [keyVariable, value]  of solution) {  
             const wordIndex = startOfWordCells.findIndex(({ startOfWordVariable }) =>
                 startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j);                
-            const clue =  clueKeys.find((f) => f.equals(keyVariable));
+            const clue =  clueKeys.find((f) => (f.i == keyVariable.i && f.j == keyVariable.j && f.direction == keyVariable.direction));
             allClues[keyVariable.direction][wordIndex + 1] = clues.get(clue);
         };
         return allClues;
@@ -442,16 +442,21 @@ export function init(component, crosswordDimentions, crossword) {
     }
 }
 
-export function update(component) {
+export function update(component, updateValues) {
 
     const { shadowRoot, actionInstance } = component;
     
-    return  Promise.resolve(actionInstance.updateValuesFromComponent(['clues', 'solution'], [component.clues, component.solution]))
-    .then(({clues, solution}) => buildValuesFromInstance({clues, solution}))
+    if(updateValues) { // we haven't created a new Action, we need to update
+        return  Promise.resolve(actionInstance.updateValues(['clues', 'solution'], [component.clues, component.solution]))
+        .then(({clues, solution}) => buildValuesFromInstance({clues, solution}))
+    } else { // we just created a new Action, no need to update again since component values are matched in the costructor of Action
+        return  Promise.resolve({clues: actionInstance.clues, solution: actionInstance.solution})
+        .then(({clues, solution}) => buildValuesFromInstance({clues, solution}))
+    }
     //.then((clues)=> updateDesktopClues(clues))
 
     function buildValuesFromInstance({ clues, solution }) {
-        const { startOfWordCells } = component.actionInstance;
+        const { startOfWordCells } = actionInstance;
         const clueKeys = Array.from(clues.keys());
         const allClues = { 'across': {}, 'down': {} };
         const cellsWithLetters = [];
@@ -461,7 +466,7 @@ export function update(component) {
             const wordIndex = startOfWordCells.findIndex(({ startOfWordVariable }) =>
                 startOfWordVariable.i == keyVariable.i && startOfWordVariable.j == keyVariable.j); 
             const cell =  startOfWordCells[wordIndex].cell;             
-            const clue =  clueKeys.find((f) => f.equals(keyVariable));
+            const clue =  clueKeys.find((f) => (f.i == keyVariable.i && f.j == keyVariable.j && f.direction == keyVariable.direction));
             allClues[keyVariable.direction][wordIndex + 1] = clues.get(clue); 
 
             // get existing solution
@@ -473,9 +478,10 @@ export function update(component) {
                }
             }            
         } 
-        const updateCellLetters = actionInstance.updateCellLetters.bind(actionInstance, cellsWithLetters)
+        const updateCellLetters = actionInstance.updateCellLetters.bind(actionInstance, cellsWithLetters);
+        const updateClues = updateDesktopClues.bind(null, allClues);
         window.requestAnimationFrame(updateCellLetters);
-        window.requestAnimationFrame(updateDesktopClues.bind(null, allClues));
+        window.requestAnimationFrame(updateClues);
         // return allClues;
     }
 

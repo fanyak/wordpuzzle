@@ -65,7 +65,7 @@ Variable.isSameCell = (cell1, cell2) => {
 class Crossword {
     constructor(structure, words, height, width) {
         //  Determine structure of crossword      
-        this.constraints = structure.constraints;
+        this.constraints = structure;
         // console.log(this.constraints)
         this.height = height;
         this.width = width;
@@ -83,7 +83,7 @@ class Crossword {
         }
         // console.log(this.structure)
 
-        this.words = [...new Set(words.vocab.map(word => word.toUpperCase()))];
+        this.words = [...new Set(words.map(word => word.toUpperCase()))];
         //console.log(this.words.slice(0,10))
 
         // Determine variable set
@@ -186,8 +186,5 @@ class Crossword {
         return _neighbors;
     }
 
-
 }
 
-
-export { Crossword, Variable, };

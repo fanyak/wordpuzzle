@@ -9,7 +9,6 @@
  */
 
 import { PolymerElement, html, } from '@polymer/polymer/polymer-element.js';
-import { touchesDistance } from './helper.js';
 import './shared-styles.js';
 
 
@@ -312,32 +311,32 @@ class MyView2 extends PolymerElement {
       }  
 
       #toolbar:not([hidden]) {
-        display: flex;
-        width: 530px;
-        flex-direction: row;
-        justify-content: space-between;
+        
       }
 
       .clueEdit {
         display: flex;
         flex: 1;
-        max-width: 400px;
+        /* max-width: 400px; */
+        padding-left: 35px;
         background-color: lightblue;
-        justify-content: space-between;
+        justify-content: start;
         align-items: center;
         color: #444;
-
       }
+
       .clueEdit span {
         display: inline-block;
-        width: 80px;
+        width: 90px;
         padding-left: 5px;
         font-weight: bold;
+        text-transform: uppercase;
         box-sizing: content-box;
+        font-size: 15px;
       }
 
       .clueText {
-        flex: 1;
+        flex-basis: 400px;
         display: flex;
         height: 35px;
         padding-left: 5px;
@@ -380,12 +379,15 @@ class MyView2 extends PolymerElement {
         </form>
 
         <div id="toolbar" hidden>
-          <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
+          <div>
+            <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
+            <button id="generate-solution" type="button" data-tooltip="Generate Solution" on-click ="generate">&#128270;</button>
+          </div>
           <div class="clueEdit">
-          <!-- https://polymer-library.polymer-project.org/2.0/docs/devguide/model-data#notify-path-->
+            <!-- https://polymer-library.polymer-project.org/2.0/docs/devguide/model-data#notify-path-->
             <span>{{action.selectedClue}}</span>
-            <span>{{action.selectedClueText}}</span>
-            <div contenteditable='true' class="clueText" textContent="{{action.selectedClueText}}"></div>
+            <!--<span>{{action.selectedClueText}}</span> -->
+            <div contenteditable='true' class="clueText" textContent="{{action.selectedClueText}}" on-keydown="addClueOnEnter"></div>
             <button on-click ="addClue">Add Clue</button>
           </div>
         </div>
@@ -441,7 +443,7 @@ class MyView2 extends PolymerElement {
     this.constraints;
     // only contain for the updates not the entire lists
     this.solution = new Map();
-    this.clues = new Map();
+    this.clues = new Map();   
   }
  
   ready() {
@@ -586,8 +588,9 @@ class MyView2 extends PolymerElement {
        const clueKeysArray = Array.from(this.clues.keys());
        const solutionKeysArray = Array.from(this.solution.keys());
 
+       // must create copy of the actionInstance clues and solution, but also keep the rerence to the variables(?)
        for(let k of clueKeysArray) {
-          // if only the length has changed
+          // Iff only the length has changed
          const c = vars.find(v => ( (v.i == k.i) &&(v.j == k.j) &&(v.direction == k.direction))  );
          // replace
          if(c) {
@@ -607,9 +610,7 @@ class MyView2 extends PolymerElement {
          this.solution.delete(l);
        }
 
-       console.log(this.solution)
-
-       return this.updateView();
+       return this.updateView(false);
     });
   }
 
@@ -639,18 +640,19 @@ class MyView2 extends PolymerElement {
       }, true);
       
       this.managedClicks = true;
-    }    
+    } 
+    this.$.dimentions.setAttribute('hidden', 'hidden')   
   }
 
 
   // updates
 
-  updateView() {
+  updateView(updateValues) {
     return Promise.all([import('./component.js'), import('./helper.js')])
     .then(([view, helper]) => {
       this.helper = helper;
       const component = this;
-      return view.update(component);
+      return view.update(component, updateValues);
     });
   }
   
@@ -668,13 +670,58 @@ class MyView2 extends PolymerElement {
       this.clues.set(v, value);
     }
     //console.log(this.clues)
-    this.updateView().then(() => {
+    this.updateView(true).then(() => {
       console.log('selected clue', this.action.selectedClueText);
     });
   }
 
+  addClueOnEnter(evt) {
+    if(evt.key == 'Enter'){
+      evt.preventDefault();
+      this.addClue();
+    }
+  }
+
   _activeChanged(action) {
     console.log('aaaa', 'active changed');    
+  }
+
+
+  generate() {
+    // transform objects to existing variables
+    const {solution} = this.actionInstance.updateValues(['solution'], [this.actionInstance.solution])
+    const load = {
+      constraints : JSON.stringify(this.actionInstance.crossword.constraints), 
+      // JSON.stringify(this.actionInstance.crossword.words),
+      width: this.actionInstance.crossword.width,
+      height: this.actionInstance.crossword.height,
+      solution: JSON.stringify(Array.from(solution)),
+    }
+    const rootUrl = 'http://localhost:3000';
+
+    const options = { 
+        method: 'POST',
+        mode: 'cors', // request to a server of another origin if we are at a cdn
+        cache: 'no-store', // *default, no-cache, reload, force-cache, only-if-cached       
+        headers: {
+        'Content-Type': 'application/json'
+        },
+        body:JSON.stringify(load)
+    };
+
+    fetch(`${rootUrl}/api/generate/`, options)
+    .then(response => response.json())
+    .then(({solution}) => {
+      if(solution) {
+        this.solution = new Map(solution);
+        return this.updateView(true);
+      } else {
+        // @TODO ALERT THAT NO FILL SOLUTION WAS FIND
+      }
+      
+    })
+    .then(console.log, console.error);
+    
   }
 
 
