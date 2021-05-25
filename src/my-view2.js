@@ -346,6 +346,29 @@ class MyView2 extends PolymerElement {
         cursor: pointer;
       }
 
+      .modal {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        position:  absolute;
+        top: 50px;
+        z-index: 2;
+      }
+
+      .modal > div {
+        width: 500px;
+        height: 500px;
+      }
+
+      .modal:before {
+        content: "";
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        z-index: -1;
+        background: lightgray;
+      }
+
     </style>
 
       <div class="card">
@@ -382,6 +405,7 @@ class MyView2 extends PolymerElement {
           <div>
             <button id="new-grid" type="button" data-tooltip="Add Black Cell" on-click ="toggleConstraint">&#9632;</button>
             <button id="generate-solution" type="button" data-tooltip="Generate Solution" on-click ="generate">&#128270;</button>
+            <button id="re-try" type="button" data-tooltip="Generate Solution" on-click ="edit">&#128472;</button>
           </div>
           <div class="clueEdit">
             <!-- https://polymer-library.polymer-project.org/2.0/docs/devguide/model-data#notify-path-->
@@ -418,6 +442,11 @@ class MyView2 extends PolymerElement {
 
         </main>
 
+        <div class="modal">
+            <div>
+              <h1>Words you want to Exclude</h1>
+            </div>
+        </div>
 
       </div>
     `;
@@ -439,7 +468,7 @@ class MyView2 extends PolymerElement {
   constructor() {
     super();
     this.actionInstance;
-    this.gridFile = 7;
+    this.gridFile = '6';
     this.constraints;
     // only contain for the updates not the entire lists
     this.solution = new Map();
@@ -686,16 +715,16 @@ class MyView2 extends PolymerElement {
     console.log('aaaa', 'active changed');    
   }
 
-
   generate() {
     // transform objects to existing variables
-    const {solution} = this.actionInstance.updateValues(['solution'], [this.actionInstance.solution])
+    const {solution} = this.actionInstance.updateValues(['solution'], [this.actionInstance.solution]);   
     const load = {
       constraints : JSON.stringify(this.actionInstance.crossword.constraints), 
       // JSON.stringify(this.actionInstance.crossword.words),
       width: this.actionInstance.crossword.width,
       height: this.actionInstance.crossword.height,
       solution: JSON.stringify(Array.from(solution)),
+      exclude: JSON.stringify(['SSSS', 'NLERS']),
     }
     const rootUrl = 'http://localhost:3000';
 
@@ -714,14 +743,21 @@ class MyView2 extends PolymerElement {
     .then(({solution}) => {
       if(solution) {
         this.solution = new Map(solution);
+        for(let [key,value] of this.solution) {
+          this.solution.set(key, value.split('')); // make the value be an array again
+        }
+        console.log(this.solution);
         return this.updateView(true);
       } else {
         // @TODO ALERT THAT NO FILL SOLUTION WAS FIND
       }
       
     })
-    .then(console.log, console.error);
-    
+    .then(console.log, console.error);    
+  }
+
+  edit() {
+
   }
 
 

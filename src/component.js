@@ -54,8 +54,8 @@ export function init(component, crosswordDimentions, crossword) {
 
     // if we haven't already fetched the words
     if(!crossword) {
-    gridFiles.push('api/words');
-    reqHeaders.push({ method: 'GET', ...headers});
+        gridFiles.push('api/words');
+        reqHeaders.push({ method: 'GET', ...headers});
     }
 
     const fetchFiles = gridFiles.map((req) => `${rootUrl}${req}`);
@@ -67,9 +67,7 @@ export function init(component, crosswordDimentions, crossword) {
         // fetch both words and grid (either given grid or empty)
         promise = Promise.all(fetchFiles.map((file,indx) => fetch(file, reqHeaders[indx])))
         .then(responses => Promise.all(responses.map(response => response.json())));
-
         // @TODO we must store the id of the grid if we created one!!!!  DON'T CREATE ONE UNITL WE SAVE
-
     } else if (!crossword && constraints) { 
         // we have the constraints
         constraints = manageConstraints([...constraints]); 
@@ -82,9 +80,7 @@ export function init(component, crosswordDimentions, crossword) {
         promise = fetch(fetchFiles[0], reqHeaders[0])
         .then(response => response.json())
         .then((structure) => [structure, {vocab:crossword.words}]);
-
         // @TODO we must store the id of the grid if we created one - DON'T CREATE ONE UNITL WE SAVE !!!!
-
     } else { // we have the constraints and the crossword => resolve promise
         constraints = manageConstraints([...constraints]);
         promise = Promise.resolve([{constraints}, {vocab:crossword.words}]);
@@ -472,9 +468,9 @@ export function update(component, updateValues) {
             // get existing solution
             for(let i = 0; i <= value.length; i++){
                if(isLetterEnglish(value[i])){
-                const diff = keyVariable.direction == Variable.ACROSS ? (i * 1) : (i * actionInstance.crossword.width);
-                const nextId = getCellNumber(cell) + diff;
-                cellsWithLetters.push({cellId:`cell-id-${nextId}`, letter: value[i]});
+                    const diff = keyVariable.direction == Variable.ACROSS ? (i * 1) : (i * actionInstance.crossword.width);
+                    const nextId = getCellNumber(cell) + diff;
+                    cellsWithLetters.push({cellId:`cell-id-${nextId}`, letter: value[i]});
                }
             }            
         } 

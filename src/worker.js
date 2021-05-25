@@ -34,7 +34,7 @@ function createSolution([s,v,d]) {
                 if(letter){ // if we have added a letter
                     value[cellIndex] = letter;
                     solution[indx] = [variable, value];
-                } else {
+                } else { // no letter
                     // we have Erased the existing letter of the solution
                     // if it is a string and not the original array
                     if (value[cellIndex] && value[cellIndex][0] != key.cells[cellIndex][0]) {

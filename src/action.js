@@ -542,6 +542,7 @@ export class Action {
         }
     }
 
+    // Function to update the solution after we have added or removed a letter
     // run a script operation in a background thread separate from the main execution thread of a web application. 
     // The advantage of this is that laborious processing can be performed in a separate thread, 
     // allowing the main (usually the UI) thread to run without being blocked/slowed down.
@@ -559,14 +560,18 @@ export class Action {
     // @TODO return which values where updated!!! so we can only change those nodes in component.update
     updateValues(attributes, updatedValues) {
         const valueArrays = updatedValues.map((value) => Array.from(value.keys()));       
-        for (let v of this.crossword.variables) {
-            valueArrays.forEach((keysArray, indx) => {//@TODO what if we have changed the length?
+        
+        valueArrays.forEach((keysArray, indx) => {//@TODO what if we have changed the length?
+            const actionKeys = Array.from(this[attributes[indx]].keys());
+            for (let v of this.crossword.variables) {
                 const key = keysArray.find((f) => (f.i == v.i && f.j == v.j && f.direction == v.direction));
+                const actionKey = actionKeys.find((f) => (f.i == v.i && f.j == v.j && f.direction == v.direction));
                 if(key) {
-                    this[attributes[indx]].set(v, updatedValues[indx].get(key) );
+                    this[attributes[indx]].set(actionKey, updatedValues[indx].get(key) );
                 }
-            });
-         }
+            }
+        });
+         
          return attributes.reduce( (acc,cur) => {
                 acc[cur] = this[cur];
                 return acc; 
